@@ -574,7 +574,7 @@ impl BoltzApiClientV2 {
         Ok(serde_json::from_str(&self.get(&end_point)?)?)
     }
 
-    /// Accepts a specific quote for a Zero-Amount Receive Chain Swap.
+    /// Accepts a specific quote for a Zero-Amount or over- or underpaid Chain Swap.
     pub fn accept_quote(&self, swap_id: &str, amount_sat: u64) -> Result<(), Error> {
         let data = json!(
             {
