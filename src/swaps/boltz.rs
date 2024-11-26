@@ -565,7 +565,7 @@ impl BoltzApiClientV2 {
         Ok(serde_json::from_str(&self.post(&end_point, data)?)?)
     }
 
-    /// Looks up the quote for a Zero-Amount Receive Chain Swap.
+    /// Gets a quote for a Zero-Amount or over- or underpaid Chain Swap.
     ///
     /// If the user locked up a valid amount, it will return the server lockup amount. In all other
     /// cases, it will return an error.
