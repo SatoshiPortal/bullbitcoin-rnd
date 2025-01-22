@@ -408,18 +408,40 @@ impl BtcSwapScript {
     ) -> Result<Vec<(OutPoint, TxOut)>, Error> {
         let electrum_client = network_config.build_client()?;
         let spk = self.to_address(network_config.network())?.script_pubkey();
-        let utxos = electrum_client.script_list_unspent(spk.as_script())?;
-        let utxo_pairs = utxos
+        let history: Vec<_> = electrum_client
+            .script_get_history(spk.as_script())?
+            .into_iter()
+            .filter(|h| h.height > 0)
+            .collect();
+        let txs = electrum_client
+            .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
+
+        let utxo_pairs = txs
             .iter()
-            .map(|unspent| {
-                let outpoint = OutPoint::new(unspent.tx_hash, unspent.tx_pos as u32);
-                let txout = TxOut {
-                    script_pubkey: spk.clone(),
-                    value: Amount::from_sat(unspent.value),
-                };
-                (outpoint, txout)
+            .flat_map(|tx| {
+                tx.output
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, output)| output.script_pubkey == *spk)
+                    .filter(|(vout, _)| {
+                        // Check if output is unspent
+                        !txs.iter().any(|spending_tx| {
+                            // Check if any input spends our output
+                            spending_tx.input.iter().any(|input| {
+                                input.previous_output.txid == tx.compute_txid()
+                                    && input.previous_output.vout == *vout as u32
+                            })
+                        })
+                    })
+                    .map(|(vout, output)| {
+                        (
+                            OutPoint::new(tx.compute_txid(), vout as u32),
+                            output.clone(),
+                        )
+                    })
             })
             .collect();
+
         Ok(utxo_pairs)
     }
 
