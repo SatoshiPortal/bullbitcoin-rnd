@@ -18,6 +18,7 @@ use bitcoin::{Amount, EcdsaSighashType, TapLeafHash, TapSighashType, Txid, XOnly
 use electrum_client::ElectrumApi;
 use elements::encode::serialize;
 use elements::pset::serialize::Serialize;
+use std::collections::HashMap;
 use std::ops::{Add, Index};
 use std::str::FromStr;
 
@@ -409,13 +410,11 @@ impl BtcSwapScript {
         let electrum_client = network_config.build_client()?;
         let spk = self.to_address(network_config.network())?.script_pubkey();
         let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
-        let txs = electrum_client.batch_transaction_get(
-            &history
-                .iter()
-                .filter(|h| h.height > 0)
-                .map(|h| h.tx_hash)
-                .collect::<Vec<_>>(),
-        )?;
+
+        let tx_heights: HashMap<_, _> = history.iter().map(|h| (h.tx_hash, h.height)).collect();
+
+        let txs = electrum_client
+            .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
 
         let utxo_pairs = txs
             .iter()
@@ -425,13 +424,23 @@ impl BtcSwapScript {
                     .enumerate()
                     .filter(|(_, output)| output.script_pubkey == *spk)
                     .filter(|(vout, _)| {
-                        // Check if output is unspent
+                        // Check if output is unspent (only consider confirmed spending txs)
                         !txs.iter().any(|spending_tx| {
-                            // Check if any input spends our output
-                            spending_tx.input.iter().any(|input| {
+                            let spends_our_output = spending_tx.input.iter().any(|input| {
                                 input.previous_output.txid == tx.compute_txid()
                                     && input.previous_output.vout == *vout as u32
-                            })
+                            });
+
+                            if !spends_our_output {
+                                return false;
+                            }
+
+                            // If it does spend our output, check if it's confirmed
+                            let spending_tx_hash = spending_tx.compute_txid();
+                            tx_heights
+                                .get(&spending_tx_hash)
+                                .map(|&height| height > 0)
+                                .unwrap_or(false)
                         })
                     })
                     .map(|(vout, output)| {
