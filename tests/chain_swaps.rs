@@ -207,34 +207,25 @@ fn bitcoin_liquid_v2_chain() {
                     // This means the funding transaction was rejected by Boltz for whatever reason, and we need to get
                     // fund back via refund.
                     if update.status == "transaction.lockupFailed" {
+                        std::thread::sleep(Duration::from_secs(10));
                         log::info!("REFUNDING!");
-                        let refund_tx = BtcSwapTx::new_refund(
+                        refund_bitcoin_liquid_v2_chain(
                             lockup_script.clone(),
-                            &refund_address,
-                            &ElectrumConfig::default_bitcoin(),
-                            BOLTZ_TESTNET_URL_V2.to_owned(),
+                            refund_address.clone(),
                             swap_id.clone(),
-                        )
-                        .unwrap();
-                        let tx = refund_tx
-                            .sign_refund(
-                                &our_refund_keys,
-                                Fee::Absolute(1000),
-                                Some(Cooperative {
-                                    boltz_api: &boltz_api_v2,
-                                    swap_id: swap_id.clone(),
-                                    pub_nonce: None,
-                                    partial_sig: None,
-                                }),
-                            )
-                            .unwrap();
-
-                        refund_tx
-                            .broadcast(&tx, &ElectrumConfig::default_bitcoin())
-                            .unwrap();
-
-                        log::info!("Succesfully broadcasted claim tx!");
-                        log::debug!("Claim Tx {:?}", tx);
+                            our_refund_keys,
+                            boltz_api_v2.clone(),
+                            100,
+                        );
+                        log::info!("REFUNDING with higher fee");
+                        refund_bitcoin_liquid_v2_chain(
+                            lockup_script.clone(),
+                            refund_address.clone(),
+                            swap_id.clone(),
+                            our_refund_keys,
+                            boltz_api_v2.clone(),
+                            1000,
+                        );
                     }
                 }
 
@@ -255,6 +246,43 @@ fn bitcoin_liquid_v2_chain() {
             }
         }
     }
+}
+
+fn refund_bitcoin_liquid_v2_chain(
+    lockup_script: BtcSwapScript,
+    refund_address: String,
+    swap_id: String,
+    our_refund_keys: Keypair,
+    boltz_api_v2: BoltzApiClientV2,
+    absolute_fees: u64,
+) {
+    let refund_tx = BtcSwapTx::new_refund(
+        lockup_script.clone(),
+        &refund_address,
+        &ElectrumConfig::default_bitcoin(),
+        BOLTZ_TESTNET_URL_V2.to_owned(),
+        swap_id.clone(),
+    )
+    .unwrap();
+    let tx = refund_tx
+        .sign_refund(
+            &our_refund_keys,
+            Fee::Absolute(absolute_fees),
+            Some(Cooperative {
+                boltz_api: &boltz_api_v2,
+                swap_id: swap_id.clone(),
+                pub_nonce: None,
+                partial_sig: None,
+            }),
+        )
+        .unwrap();
+
+    refund_tx
+        .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+        .unwrap();
+
+    log::info!("Succesfully broadcasted claim tx!");
+    log::debug!("Claim Tx {:?}", tx);
 }
 
 #[test]
