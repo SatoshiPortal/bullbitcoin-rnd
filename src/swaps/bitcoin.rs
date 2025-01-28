@@ -408,13 +408,14 @@ impl BtcSwapScript {
     ) -> Result<Vec<(OutPoint, TxOut)>, Error> {
         let electrum_client = network_config.build_client()?;
         let spk = self.to_address(network_config.network())?.script_pubkey();
-        let history: Vec<_> = electrum_client
-            .script_get_history(spk.as_script())?
-            .into_iter()
-            .filter(|h| h.height > 0)
-            .collect();
-        let txs = electrum_client
-            .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
+        let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
+        let txs = electrum_client.batch_transaction_get(
+            &history
+                .iter()
+                .filter(|h| h.height > 0)
+                .map(|h| h.tx_hash)
+                .collect::<Vec<_>>(),
+        )?;
 
         let utxo_pairs = txs
             .iter()
