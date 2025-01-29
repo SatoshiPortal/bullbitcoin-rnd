@@ -411,7 +411,8 @@ impl BtcSwapScript {
         let spk = self.to_address(network_config.network())?.script_pubkey();
         let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
 
-        let tx_heights: HashMap<_, _> = history.iter().map(|h| (h.tx_hash, h.height)).collect();
+        let tx_is_confirmed_map: HashMap<_, _> =
+            history.iter().map(|h| (h.tx_hash, h.height > 0)).collect();
 
         let txs = electrum_client
             .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
@@ -437,9 +438,9 @@ impl BtcSwapScript {
 
                             // If it does spend our output, check if it's confirmed
                             let spending_tx_hash = spending_tx.compute_txid();
-                            tx_heights
+                            tx_is_confirmed_map
                                 .get(&spending_tx_hash)
-                                .map(|&height| height > 0)
+                                .copied()
                                 .unwrap_or(false)
                         })
                     })
