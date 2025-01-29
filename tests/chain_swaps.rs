@@ -281,8 +281,8 @@ fn refund_bitcoin_liquid_v2_chain(
         .broadcast(&tx, &ElectrumConfig::default_bitcoin())
         .unwrap();
 
-    log::info!("Succesfully broadcasted claim tx!");
-    log::debug!("Claim Tx {:?}", tx);
+    log::info!("Successfully broadcasted refund tx!");
+    log::debug!("Refund Tx {:?}", tx);
 }
 
 #[test]
