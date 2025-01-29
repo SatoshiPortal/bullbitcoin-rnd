@@ -15,7 +15,7 @@ use bitcoin::{
 };
 use bitcoin::{sighash::SighashCache, Network, Sequence, Transaction, TxIn, TxOut, Witness};
 use bitcoin::{Amount, EcdsaSighashType, TapLeafHash, TapSighashType, Txid, XOnlyPublicKey};
-use electrum_client::ElectrumApi;
+use electrum_client::{ElectrumApi, GetHistoryRes};
 use elements::encode::serialize;
 use elements::pset::serialize::Serialize;
 use std::collections::HashMap;
@@ -411,14 +411,21 @@ impl BtcSwapScript {
         let spk = self.to_address(network_config.network())?.script_pubkey();
         let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
 
-        let tx_is_confirmed_map: HashMap<_, _> =
-            history.iter().map(|h| (h.tx_hash, h.height > 0)).collect();
-
         let txs = electrum_client
             .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
 
-        let utxo_pairs = txs
-            .iter()
+        Ok(Self::fetch_utxos_core(&txs, &history, &spk))
+    }
+
+    fn fetch_utxos_core(
+        txs: &[Transaction],
+        history: &[GetHistoryRes],
+        spk: &ScriptBuf,
+    ) -> Vec<(OutPoint, TxOut)> {
+        let tx_is_confirmed_map: HashMap<_, _> =
+            history.iter().map(|h| (h.tx_hash, h.height > 0)).collect();
+
+        txs.iter()
             .flat_map(|tx| {
                 tx.output
                     .iter()
@@ -451,9 +458,7 @@ impl BtcSwapScript {
                         )
                     })
             })
-            .collect();
-
-        Ok(utxo_pairs)
+            .collect()
     }
 
     /// Fetch utxo for script from BoltzApi
@@ -1223,5 +1228,164 @@ impl BtcSwapTx {
         Ok(network_config
             .build_client()?
             .transaction_broadcast(signed_tx)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BtcSwapScript;
+    use bitcoin::absolute::LockTime;
+    use bitcoin::blockdata::transaction::Transaction;
+    use bitcoin::blockdata::transaction::Txid;
+    use bitcoin::transaction::Version;
+    use bitcoin::{Amount, OutPoint, Script, ScriptBuf, TxIn, TxOut};
+    use electrum_client::GetHistoryRes;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_utxo_fetching() {
+        let our_script = ScriptBuf::from_hex("aaaa").unwrap();
+        let other_script = ScriptBuf::from_hex("bbbb").unwrap();
+
+        // Pending tx with unspent output
+        let tx1 = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(1000),
+                script_pubkey: our_script.clone(),
+            }],
+        };
+
+        let tx1_id = tx1.compute_txid();
+
+        // Confirmed tx with unspent output
+        let tx2 = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(2000),
+                script_pubkey: our_script.clone(),
+            }],
+        };
+
+        let tx2_id = tx2.compute_txid();
+
+        // Confirmed tx with unconfirmed spend
+        let tx3 = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(5000),
+                script_pubkey: our_script.clone(),
+            }],
+        };
+
+        let tx3_id = tx3.compute_txid();
+
+        // Confirmed tx with confirmed spend
+        let tx4 = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn::default()],
+            output: vec![TxOut {
+                value: Amount::from_sat(4500),
+                script_pubkey: our_script.clone(),
+            }],
+        };
+
+        let tx4_id = tx4.compute_txid();
+
+        // Confirmed spending tx for tx4's output
+        let spending_tx = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::new(tx4_id, 0),
+                ..Default::default()
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(1500),
+                script_pubkey: other_script.clone(),
+            }],
+        };
+
+        let spending_tx_id = spending_tx.compute_txid();
+
+        // Pending spending tx for tx3's output
+        let pending_spending_tx = Transaction {
+            version: Version(1),
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint::new(tx3_id, 0),
+                ..Default::default()
+            }],
+            output: vec![TxOut {
+                value: Amount::from_sat(500),
+                script_pubkey: other_script.clone(),
+            }],
+        };
+
+        let pending_spending_tx_id = pending_spending_tx.compute_txid();
+
+        // Transaction history
+        let history = vec![
+            GetHistoryRes {
+                tx_hash: tx1_id,
+                height: 0, // Pending
+                fee: None,
+            },
+            GetHistoryRes {
+                tx_hash: tx2_id,
+                height: 100, // Confirmed
+                fee: None,
+            },
+            GetHistoryRes {
+                tx_hash: tx3_id,
+                height: 101, // Confirmed
+                fee: None,
+            },
+            GetHistoryRes {
+                tx_hash: tx4_id,
+                height: 102, // Confirmed
+                fee: None,
+            },
+            GetHistoryRes {
+                tx_hash: spending_tx_id,
+                height: 103, // Confirmed
+                fee: None,
+            },
+            GetHistoryRes {
+                tx_hash: pending_spending_tx_id,
+                height: 0, // Pending
+                fee: None,
+            },
+        ];
+
+        let utxo_pairs = BtcSwapScript::fetch_utxos_core(
+            &[tx1, tx2, tx3, tx4, spending_tx, pending_spending_tx],
+            &history,
+            &our_script,
+        );
+
+        assert_eq!(utxo_pairs.len(), 3);
+
+        // Pending tx with unspent output
+        assert!(utxo_pairs
+            .iter()
+            .any(|(outpoint, _)| outpoint.txid == tx1_id));
+
+        // Confirmed tx with unspent output
+        assert!(utxo_pairs
+            .iter()
+            .any(|(outpoint, _)| outpoint.txid == tx2_id));
+
+        // Confirmed tx with unconfirmed spend
+        assert!(utxo_pairs
+            .iter()
+            .any(|(outpoint, _)| outpoint.txid == tx3_id));
     }
 }
