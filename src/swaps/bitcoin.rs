@@ -550,10 +550,10 @@ impl BtcSwapTx {
             ));
         }
 
-        let network = if network_config.network() == Chain::Bitcoin {
-            Network::Bitcoin
-        } else {
-            Network::Testnet
+        let network = match network_config.network() {
+            Chain::Bitcoin => Network::Bitcoin,
+            Chain::BitcoinTestnet => Network::Testnet,
+            _ => Network::Regtest,
         };
         let address = Address::from_str(&claim_address)?;
 
@@ -597,10 +597,10 @@ impl BtcSwapTx {
             ));
         }
 
-        let network = if network_config.network() == Chain::Bitcoin {
-            Network::Bitcoin
-        } else {
-            Network::Testnet
+        let network = match network_config.network() {
+            Chain::Bitcoin => Network::Bitcoin,
+            Chain::BitcoinTestnet => Network::Testnet,
+            _ => Network::Regtest,
         };
 
         let address = Address::from_str(refund_address)?;
