@@ -1262,26 +1262,25 @@ impl LBtcSwapTx {
     }
 
     /// Calculate the size of a transaction.
+    /// The `preimage` is only required when calculating the claim tx size.
     /// Use this before calling drain to help calculate the absolute fees.
     /// Multiply the size by the fee_rate to get the absolute fees.
     pub fn size(
         &self,
         keys: &Keypair,
-        preimage: &Preimage,
+        preimage: Option<&Preimage>,
+        is_cooperative: bool,
         is_discount_ct: bool,
     ) -> Result<usize, Error> {
-        let dummy_abs_fee = 0;
+        let dummy_abs_fee = 1;
         let tx = match self.kind {
-            SwapTxKind::Claim => self.sign_claim(
-                keys,
-                preimage,
-                Fee::Absolute(dummy_abs_fee),
-                None,
-                is_discount_ct,
-            )?,
-            SwapTxKind::Refund => {
-                self.sign_refund(keys, Fee::Absolute(dummy_abs_fee), None, is_discount_ct)?
+            SwapTxKind::Claim => {
+                let Some(preimage) = preimage else {
+                    return Err(Error::Protocol("No preimage provided.".to_string()));
+                };
+                self.create_claim(keys, preimage, dummy_abs_fee, is_cooperative)?
             }
+            SwapTxKind::Refund => self.create_refund(keys, dummy_abs_fee, is_cooperative)?,
         };
         Ok(tx_size(&tx, is_discount_ct))
     }
