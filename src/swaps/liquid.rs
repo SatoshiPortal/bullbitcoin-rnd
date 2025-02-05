@@ -1268,17 +1268,14 @@ impl LBtcSwapTx {
     pub fn size(
         &self,
         keys: &Keypair,
-        preimage: Option<&Preimage>,
         is_cooperative: bool,
         is_discount_ct: bool,
     ) -> Result<usize, Error> {
         let dummy_abs_fee = 1;
         let tx = match self.kind {
             SwapTxKind::Claim => {
-                let Some(preimage) = preimage else {
-                    return Err(Error::Protocol("No preimage provided.".to_string()));
-                };
-                self.create_claim(keys, preimage, dummy_abs_fee, is_cooperative)?
+                let preimage = Preimage::from_vec([0; 32].to_vec())?;
+                self.create_claim(keys, &preimage, dummy_abs_fee, is_cooperative)?
             }
             SwapTxKind::Refund => self.create_refund(keys, dummy_abs_fee, is_cooperative)?,
         };

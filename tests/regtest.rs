@@ -109,15 +109,13 @@ fn prepare_btc_claim() -> (
 
 #[test]
 fn btc_reverse_claim_size() {
-    let (_test_framework, _scan_request, swap_tx, preimage, recvr_keypair, _utxos) =
+    let (_test_framework, _scan_request, swap_tx, _preimage, recvr_keypair, _utxos) =
         prepare_btc_claim();
 
-    let coop_claim_tx_size = swap_tx.size(&recvr_keypair, Some(&preimage), true).unwrap();
+    let coop_claim_tx_size = swap_tx.size(&recvr_keypair, true).unwrap();
     assert_eq!(coop_claim_tx_size, 84);
 
-    let non_coop_claim_tx_size = swap_tx
-        .size(&recvr_keypair, Some(&preimage), false)
-        .unwrap();
+    let non_coop_claim_tx_size = swap_tx.size(&recvr_keypair, false).unwrap();
     assert_eq!(non_coop_claim_tx_size, 140);
 }
 
@@ -277,10 +275,10 @@ fn prepare_btc_refund() -> (
 fn btc_submarine_refund_size() {
     let (_test_framework, _scan_request, swap_tx, sender_keypair, _utxos) = prepare_btc_refund();
 
-    let coop_refund_tx_size = swap_tx.size(&sender_keypair, None, true).unwrap();
+    let coop_refund_tx_size = swap_tx.size(&sender_keypair, true).unwrap();
     assert_eq!(coop_refund_tx_size, 84);
 
-    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, None, false).unwrap();
+    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, false).unwrap();
     assert_eq!(non_coop_refund_tx_size, 126);
 }
 
@@ -441,17 +439,20 @@ fn prepare_lbtc_claim() -> (
 
 #[test]
 fn lbtc_reverse_claim_size() {
-    let (_test_framework, swap_tx, preimage, recvr_keypair, _blinding_keypair, _swap_addrs, _utxos) =
-        prepare_lbtc_claim();
+    let (
+        _test_framework,
+        swap_tx,
+        _preimage,
+        recvr_keypair,
+        _blinding_keypair,
+        _swap_addrs,
+        _utxos,
+    ) = prepare_lbtc_claim();
 
-    let coop_claim_tx_size = swap_tx
-        .size(&recvr_keypair, Some(&preimage), true, true)
-        .unwrap();
+    let coop_claim_tx_size = swap_tx.size(&recvr_keypair, true, true).unwrap();
     assert_eq!(coop_claim_tx_size, 165);
 
-    let non_coop_claim_tx_size = swap_tx
-        .size(&recvr_keypair, Some(&preimage), false, true)
-        .unwrap();
+    let non_coop_claim_tx_size = swap_tx.size(&recvr_keypair, false, true).unwrap();
     assert_eq!(non_coop_claim_tx_size, 221);
 }
 
@@ -590,10 +591,10 @@ fn lbtc_submarine_refund_size() {
     let (_test_framework, swap_tx, sender_keypair, _blinding_keypair, _swap_addrs, _utxos) =
         prepare_lbtc_refund();
 
-    let coop_refund_tx_size = swap_tx.size(&sender_keypair, None, true, true).unwrap();
+    let coop_refund_tx_size = swap_tx.size(&sender_keypair, true, true).unwrap();
     assert_eq!(coop_refund_tx_size, 165);
 
-    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, None, false, true).unwrap();
+    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, false, true).unwrap();
     assert_eq!(non_coop_refund_tx_size, 207);
 }
 
