@@ -1251,7 +1251,7 @@ impl LBtcSwapTx {
         let mut witness = Witness::new();
         // Stub because we don't want to create cooperative signatures here
         // but still be able to have an accurate size estimation
-        witness.push([0, 64]);
+        witness.push([0; 64]);
 
         TxInWitness {
             amount_rangeproof: None,
@@ -1262,7 +1262,6 @@ impl LBtcSwapTx {
     }
 
     /// Calculate the size of a transaction.
-    /// The `preimage` is only required when calculating the claim tx size.
     /// Use this before calling drain to help calculate the absolute fees.
     /// Multiply the size by the fee_rate to get the absolute fees.
     pub fn size(
