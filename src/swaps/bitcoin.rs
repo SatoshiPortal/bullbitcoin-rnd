@@ -1200,21 +1200,21 @@ impl BtcSwapTx {
         let mut witness = Witness::new();
         // Stub because we don't want to create cooperative signatures here
         // but still be able to have an accurate size estimation
-        witness.push([0, 64]);
+        witness.push([0; 64]);
         witness
     }
 
     /// Calculate the size of a transaction.
     /// Use this before calling drain to help calculate the absolute fees.
     /// Multiply the size by the fee_rate to get the absolute fees.
-    pub fn size(&self, keys: &Keypair, preimage: &Preimage) -> Result<usize, Error> {
-        let dummy_abs_fee = 0;
-        // Can only calculate non-coperative claims
+    pub fn size(&self, keys: &Keypair, is_cooperative: bool) -> Result<usize, Error> {
+        let dummy_abs_fee = 1;
         let tx = match self.kind {
             SwapTxKind::Claim => {
-                self.sign_claim(keys, preimage, Fee::Absolute(dummy_abs_fee), None)?
+                let preimage = Preimage::from_vec([0; 32].to_vec())?;
+                self.create_claim(keys, &preimage, dummy_abs_fee, is_cooperative)?
             }
-            SwapTxKind::Refund => self.sign_refund(keys, Fee::Absolute(dummy_abs_fee), None)?,
+            SwapTxKind::Refund => self.create_refund(keys, dummy_abs_fee, is_cooperative)?,
         };
         Ok(tx.vsize())
     }

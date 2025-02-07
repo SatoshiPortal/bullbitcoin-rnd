@@ -3,7 +3,7 @@ use bitcoin::key::rand::thread_rng;
 use bitcoin::key::{Keypair, PublicKey};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Amount, OutPoint, TxOut};
-use bitcoind::bitcoincore_rpc::json::ScanTxOutRequest;
+use bitcoind::bitcoincore_rpc::json::{AddressType, ScanTxOutRequest};
 use bitcoind::bitcoincore_rpc::RpcApi;
 use boltz_client::boltz::{SwapTxKind, SwapType};
 use boltz_client::fees::Fee;
@@ -86,7 +86,7 @@ fn prepare_btc_claim() -> (
 
     let test_wallet = test_framework.get_test_wallet();
     let refund_addrs = test_wallet
-        .get_new_address(None, None)
+        .get_new_address(None, Some(AddressType::P2shSegwit))
         .unwrap()
         .assume_checked();
 
@@ -105,6 +105,18 @@ fn prepare_btc_claim() -> (
         recvr_keypair,
         utxos,
     )
+}
+
+#[test]
+fn btc_reverse_claim_size() {
+    let (_test_framework, _scan_request, swap_tx, _preimage, recvr_keypair, _utxos) =
+        prepare_btc_claim();
+
+    let coop_claim_tx_size = swap_tx.size(&recvr_keypair, true).unwrap();
+    assert_eq!(coop_claim_tx_size, 100);
+
+    let non_coop_claim_tx_size = swap_tx.size(&recvr_keypair, false).unwrap();
+    assert_eq!(non_coop_claim_tx_size, 141);
 }
 
 #[test]
@@ -158,7 +170,7 @@ fn btc_reverse_claim_relative_fee() {
         .fold(0, |acc, (_, out)| acc + out.value.to_sat())
         - claim_tx.output[0].value.to_sat();
     assert_eq!(relative_fee, claim_tx_fee as f64 / claim_tx.vsize() as f64);
-    assert_eq!(claim_tx_fee, 140);
+    assert_eq!(claim_tx_fee, 141);
 
     test_framework
         .as_ref()
@@ -245,7 +257,7 @@ fn prepare_btc_refund() -> (
 
     let test_wallet = test_framework.get_test_wallet();
     let refund_addrs = test_wallet
-        .get_new_address(None, None)
+        .get_new_address(None, Some(AddressType::P2shSegwit))
         .unwrap()
         .assume_checked();
 
@@ -257,6 +269,17 @@ fn prepare_btc_refund() -> (
     };
 
     (test_framework, scan_request, swap_tx, sender_keypair, utxos)
+}
+
+#[test]
+fn btc_submarine_refund_size() {
+    let (_test_framework, _scan_request, swap_tx, sender_keypair, _utxos) = prepare_btc_refund();
+
+    let coop_refund_tx_size = swap_tx.size(&sender_keypair, true).unwrap();
+    assert_eq!(coop_refund_tx_size, 100);
+
+    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, false).unwrap();
+    assert_eq!(non_coop_refund_tx_size, 127);
 }
 
 #[test]
@@ -317,7 +340,7 @@ fn btc_submarine_refund_relative_fee() {
         relative_fee,
         refund_tx_fee as f64 / refund_tx.vsize() as f64
     );
-    assert_eq!(refund_tx_fee, 126);
+    assert_eq!(refund_tx_fee, 127);
 
     // Make the timelock matured and broadcast the spend
     test_framework.generate_blocks(100);
@@ -412,6 +435,25 @@ fn prepare_lbtc_claim() -> (
         swap_addrs,
         utxo,
     )
+}
+
+#[test]
+fn lbtc_reverse_claim_size() {
+    let (
+        _test_framework,
+        swap_tx,
+        _preimage,
+        recvr_keypair,
+        _blinding_keypair,
+        _swap_addrs,
+        _utxos,
+    ) = prepare_lbtc_claim();
+
+    let coop_claim_tx_size = swap_tx.size(&recvr_keypair, true, true).unwrap();
+    assert_eq!(coop_claim_tx_size, 181);
+
+    let non_coop_claim_tx_size = swap_tx.size(&recvr_keypair, false, true).unwrap();
+    assert_eq!(non_coop_claim_tx_size, 221);
 }
 
 #[test]
@@ -542,6 +584,18 @@ fn prepare_lbtc_refund() -> (
         swap_addrs,
         utxo,
     )
+}
+
+#[test]
+fn lbtc_submarine_refund_size() {
+    let (_test_framework, swap_tx, sender_keypair, _blinding_keypair, _swap_addrs, _utxos) =
+        prepare_lbtc_refund();
+
+    let coop_refund_tx_size = swap_tx.size(&sender_keypair, true, true).unwrap();
+    assert_eq!(coop_refund_tx_size, 181);
+
+    let non_coop_refund_tx_size = swap_tx.size(&sender_keypair, false, true).unwrap();
+    assert_eq!(non_coop_refund_tx_size, 207);
 }
 
 #[test]

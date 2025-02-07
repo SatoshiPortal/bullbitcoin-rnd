@@ -1251,7 +1251,7 @@ impl LBtcSwapTx {
         let mut witness = Witness::new();
         // Stub because we don't want to create cooperative signatures here
         // but still be able to have an accurate size estimation
-        witness.push([0, 64]);
+        witness.push([0; 64]);
 
         TxInWitness {
             amount_rangeproof: None,
@@ -1267,21 +1267,16 @@ impl LBtcSwapTx {
     pub fn size(
         &self,
         keys: &Keypair,
-        preimage: &Preimage,
+        is_cooperative: bool,
         is_discount_ct: bool,
     ) -> Result<usize, Error> {
-        let dummy_abs_fee = 0;
+        let dummy_abs_fee = 1;
         let tx = match self.kind {
-            SwapTxKind::Claim => self.sign_claim(
-                keys,
-                preimage,
-                Fee::Absolute(dummy_abs_fee),
-                None,
-                is_discount_ct,
-            )?,
-            SwapTxKind::Refund => {
-                self.sign_refund(keys, Fee::Absolute(dummy_abs_fee), None, is_discount_ct)?
+            SwapTxKind::Claim => {
+                let preimage = Preimage::from_vec([0; 32].to_vec())?;
+                self.create_claim(keys, &preimage, dummy_abs_fee, is_cooperative)?
             }
+            SwapTxKind::Refund => self.create_refund(keys, dummy_abs_fee, is_cooperative)?,
         };
         Ok(tx_size(&tx, is_discount_ct))
     }
