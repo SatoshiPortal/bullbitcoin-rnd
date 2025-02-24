@@ -119,8 +119,8 @@ fn btc_reverse_claim_size() {
     assert_eq!(non_coop_claim_tx_size, 141);
 }
 
-#[test]
-fn btc_reverse_claim() {
+#[tokio::test]
+async fn btc_reverse_claim() {
     let (test_framework, scan_request, swap_tx, preimage, recvr_keypair, utxos) =
         prepare_btc_claim();
     let test_wallet = test_framework.get_test_wallet();
@@ -128,6 +128,7 @@ fn btc_reverse_claim() {
     let absolute_fee = 1_000;
     let claim_tx = swap_tx
         .sign_claim(&recvr_keypair, &preimage, Fee::Absolute(absolute_fee), None)
+        .await
         .unwrap();
 
     let claim_tx_fee = utxos
@@ -154,8 +155,8 @@ fn btc_reverse_claim() {
     assert_eq!(test_balance, Amount::from_sat(FUNDING_AMOUNT * 2 - 1_000));
 }
 
-#[test]
-fn btc_reverse_claim_relative_fee() {
+#[tokio::test]
+async fn btc_reverse_claim_relative_fee() {
     let (test_framework, scan_request, swap_tx, preimage, recvr_keypair, utxos) =
         prepare_btc_claim();
     let test_wallet = test_framework.get_test_wallet();
@@ -163,6 +164,7 @@ fn btc_reverse_claim_relative_fee() {
     let relative_fee = 1.0;
     let claim_tx = swap_tx
         .sign_claim(&recvr_keypair, &preimage, Fee::Relative(relative_fee), None)
+        .await
         .unwrap();
 
     let claim_tx_fee = utxos
@@ -282,14 +284,15 @@ fn btc_submarine_refund_size() {
     assert_eq!(non_coop_refund_tx_size, 127);
 }
 
-#[test]
-fn btc_submarine_refund() {
+#[tokio::test]
+async fn btc_submarine_refund() {
     let (test_framework, scan_request, swap_tx, sender_keypair, utxos) = prepare_btc_refund();
     let test_wallet = test_framework.get_test_wallet();
 
     let absolute_fee = 1_000;
     let refund_tx = swap_tx
         .sign_refund(&sender_keypair, Fee::Absolute(absolute_fee), None)
+        .await
         .unwrap();
 
     let refund_tx_fee = utxos
@@ -322,14 +325,15 @@ fn btc_submarine_refund() {
     );
 }
 
-#[test]
-fn btc_submarine_refund_relative_fee() {
+#[tokio::test]
+async fn btc_submarine_refund_relative_fee() {
     let (test_framework, scan_request, swap_tx, sender_keypair, utxos) = prepare_btc_refund();
     let test_wallet = test_framework.get_test_wallet();
 
     let relative_fee = 1.0;
     let refund_tx = swap_tx
         .sign_refund(&sender_keypair, Fee::Relative(relative_fee), None)
+        .await
         .unwrap();
 
     let refund_tx_fee = utxos
@@ -456,8 +460,8 @@ fn lbtc_reverse_claim_size() {
     assert_eq!(non_coop_claim_tx_size, 221);
 }
 
-#[test]
-fn lbtc_reverse_claim() {
+#[tokio::test]
+async fn lbtc_reverse_claim() {
     let (test_framework, swap_tx, preimage, recvr_keypair, blinding_keypair, swap_addrs, utxo) =
         prepare_lbtc_claim();
 
@@ -470,6 +474,7 @@ fn lbtc_reverse_claim() {
             None,
             false,
         )
+        .await
         .unwrap();
     let secp = Secp256k1::new();
     assert_eq!(
@@ -488,8 +493,8 @@ fn lbtc_reverse_claim() {
     assert!(test_framework.fetch_utxo(&swap_addrs).is_none());
 }
 
-#[test]
-fn lbtc_reverse_claim_relative_fee() {
+#[tokio::test]
+async fn lbtc_reverse_claim_relative_fee() {
     let (test_framework, swap_tx, preimage, recvr_keypair, blinding_keypair, swap_addrs, utxo) =
         prepare_lbtc_claim();
 
@@ -502,6 +507,7 @@ fn lbtc_reverse_claim_relative_fee() {
             None,
             false,
         )
+        .await
         .unwrap();
     assert_eq!(
         claim_tx.fee_in(
@@ -598,14 +604,15 @@ fn lbtc_submarine_refund_size() {
     assert_eq!(non_coop_refund_tx_size, 207);
 }
 
-#[test]
-fn lbtc_submarine_refund() {
+#[tokio::test]
+async fn lbtc_submarine_refund() {
     let (test_framework, swap_tx, sender_keypair, blinding_keypair, swap_addrs, utxo) =
         prepare_lbtc_refund();
 
     let absolute_fee = 1_000;
     let refund_tx = swap_tx
         .sign_refund(&sender_keypair, Fee::Absolute(absolute_fee), None, false)
+        .await
         .unwrap();
     assert_eq!(
         refund_tx.fee_in(
@@ -625,14 +632,15 @@ fn lbtc_submarine_refund() {
     assert!(test_framework.fetch_utxo(&swap_addrs).is_none());
 }
 
-#[test]
-fn lbtc_submarine_refund_relative_fee() {
+#[tokio::test]
+async fn lbtc_submarine_refund_relative_fee() {
     let (test_framework, swap_tx, sender_keypair, blinding_keypair, swap_addrs, utxo) =
         prepare_lbtc_refund();
 
     let relative_fee = 0.1;
     let refund_tx = swap_tx
         .sign_refund(&sender_keypair, Fee::Relative(relative_fee), None, false)
+        .await
         .unwrap();
     assert_eq!(
         refund_tx.fee_in(

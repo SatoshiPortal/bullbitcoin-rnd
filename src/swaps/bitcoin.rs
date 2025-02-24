@@ -462,7 +462,7 @@ impl BtcSwapScript {
     }
 
     /// Fetch utxo for script from BoltzApi
-    pub fn fetch_lockup_utxo_boltz(
+    pub async fn fetch_lockup_utxo_boltz(
         &self,
         network_config: &ElectrumConfig,
         boltz_url: &str,
@@ -473,7 +473,7 @@ impl BtcSwapScript {
         let hex = match self.swap_type {
             SwapType::Chain => match tx_kind {
                 SwapTxKind::Claim => {
-                    let chain_txs = boltz_client.get_chain_txs(swap_id)?;
+                    let chain_txs = boltz_client.get_chain_txs(swap_id).await?;
                     chain_txs
                         .server_lock
                         .ok_or(Error::Protocol(
@@ -483,7 +483,7 @@ impl BtcSwapScript {
                         .hex
                 }
                 SwapTxKind::Refund => {
-                    let chain_txs = boltz_client.get_chain_txs(swap_id)?;
+                    let chain_txs = boltz_client.get_chain_txs(swap_id).await?;
                     chain_txs
                         .user_lock
                         .ok_or(Error::Protocol(
@@ -493,8 +493,8 @@ impl BtcSwapScript {
                         .hex
                 }
             },
-            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id)?.hex,
-            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id)?.hex,
+            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id).await?.hex,
+            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id).await?.hex,
         };
         if (hex.is_none()) {
             return Err(Error::Hex(
@@ -537,7 +537,7 @@ pub struct BtcSwapTx {
 impl BtcSwapTx {
     /// Craft a new ClaimTx. Only works for Reverse and Chain Swaps.
     /// Returns None, if the HTLC utxo doesn't exist for the swap.
-    pub fn new_claim(
+    pub async fn new_claim(
         swap_script: BtcSwapScript,
         claim_address: String,
         network_config: &ElectrumConfig,
@@ -561,12 +561,16 @@ impl BtcSwapTx {
 
         let utxo_info = match swap_script.fetch_utxos(network_config) {
             Ok(v) => v.first().cloned(),
-            Err(_) => swap_script.fetch_lockup_utxo_boltz(
-                network_config,
-                &boltz_url,
-                &swap_id,
-                SwapTxKind::Claim,
-            )?,
+            Err(_) => {
+                swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Claim,
+                    )
+                    .await?
+            }
         };
         if let Some(utxo) = utxo_info {
             Ok(BtcSwapTx {
@@ -584,7 +588,7 @@ impl BtcSwapTx {
 
     /// Construct a RefundTX corresponding to the swap_script. Only works for Submarine and Chain Swaps.
     /// Returns None, if the HTLC UTXO for the swap doesn't exist in blockhcian.
-    pub fn new_refund(
+    pub async fn new_refund(
         swap_script: BtcSwapScript,
         refund_address: &str,
         network_config: &ElectrumConfig,
@@ -611,12 +615,14 @@ impl BtcSwapTx {
         let utxos = match swap_script.fetch_utxos(network_config) {
             Ok(r) => r,
             Err(_) => {
-                let lockup_utxo_info = swap_script.fetch_lockup_utxo_boltz(
-                    network_config,
-                    &boltz_url,
-                    &swap_id,
-                    SwapTxKind::Refund,
-                )?;
+                let lockup_utxo_info = swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Refund,
+                    )
+                    .await?;
 
                 match lockup_utxo_info {
                     Some(r) => vec![r],
@@ -691,12 +697,12 @@ impl BtcSwapTx {
     /// Errors if called on a Submarine Swap or Refund Tx.
     /// If the claim is cooperative, provide the other party's partial sigs.
     /// If this is None, transaction will be claimed via taproot script path.
-    pub fn sign_claim(
+    pub async fn sign_claim(
         &self,
         keys: &Keypair,
         preimage: &Preimage,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::Submarine {
             return Err(Error::Protocol(
@@ -766,27 +772,35 @@ impl BtcSwapTx {
             let claim_tx_hex = claim_tx.serialize().to_lower_hex_string();
             let partial_sig_resp = match self.swap_script.swap_type {
                 SwapType::Chain => match (pub_nonce, partial_sig) {
-                    (Some(pub_nonce), Some(partial_sig)) => boltz_api.post_chain_claim_tx_details(
-                        &swap_id,
-                        preimage,
-                        pub_nonce,
-                        partial_sig,
-                        ToSign {
-                            pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
-                            transaction: claim_tx_hex,
-                            index: 0,
-                        },
-                    ),
+                    (Some(pub_nonce), Some(partial_sig)) => {
+                        boltz_api
+                            .post_chain_claim_tx_details(
+                                &swap_id,
+                                preimage,
+                                pub_nonce,
+                                partial_sig,
+                                ToSign {
+                                    pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
+                                    transaction: claim_tx_hex,
+                                    index: 0,
+                                },
+                            )
+                            .await
+                    }
                     _ => Err(Error::Protocol(
                         "Chain swap claim needs a partial_sig".to_string(),
                     )),
                 },
-                SwapType::ReverseSubmarine => boltz_api.get_reverse_partial_sig(
-                    &swap_id,
-                    preimage,
-                    &claim_pub_nonce,
-                    &claim_tx_hex,
-                ),
+                SwapType::ReverseSubmarine => {
+                    boltz_api
+                        .get_reverse_partial_sig(
+                            &swap_id,
+                            preimage,
+                            &claim_pub_nonce,
+                            &claim_tx_hex,
+                        )
+                        .await
+                }
                 _ => Err(Error::Protocol(format!(
                     "Cannot get partial sig for {:?} Swap",
                     self.swap_script.swap_type
@@ -932,11 +946,11 @@ impl BtcSwapTx {
 
     /// Sign a refund transaction.
     /// Errors if called for a Reverse Swap.
-    pub fn sign_refund(
+    pub async fn sign_refund(
         &self,
         keys: &Keypair,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::ReverseSubmarine {
             return Err(Error::Protocol(
@@ -1004,18 +1018,26 @@ impl BtcSwapTx {
                 // Step 7: Get boltz's partial sig
                 let refund_tx_hex = refund_tx.serialize().to_lower_hex_string();
                 let partial_sig_resp = match self.swap_script.swap_type {
-                    SwapType::Chain => boltz_api.get_chain_partial_sig(
-                        &swap_id,
-                        input_index,
-                        &pub_nonce,
-                        &refund_tx_hex,
-                    ),
-                    SwapType::Submarine => boltz_api.get_submarine_partial_sig(
-                        &swap_id,
-                        input_index,
-                        &pub_nonce,
-                        &refund_tx_hex,
-                    ),
+                    SwapType::Chain => {
+                        boltz_api
+                            .get_chain_partial_sig(
+                                &swap_id,
+                                input_index,
+                                &pub_nonce,
+                                &refund_tx_hex,
+                            )
+                            .await
+                    }
+                    SwapType::Submarine => {
+                        boltz_api
+                            .get_submarine_partial_sig(
+                                &swap_id,
+                                input_index,
+                                &pub_nonce,
+                                &refund_tx_hex,
+                            )
+                            .await
+                    }
                     _ => Err(Error::Protocol(format!(
                         "Cannot get partial sig for {:?} Swap",
                         self.swap_script.swap_type

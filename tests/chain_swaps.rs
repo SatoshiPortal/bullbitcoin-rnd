@@ -14,9 +14,9 @@ use boltz_client::{
 use elements::Address as EAddress;
 use std::str::FromStr;
 
-#[test]
+#[tokio::test]
 #[ignore]
-fn bitcoin_liquid_v2_chain() {
+async fn bitcoin_liquid_v2_chain() {
     setup_logger();
     let network = Chain::BitcoinTestnet;
     let secp = Secp256k1::new();
@@ -51,7 +51,7 @@ fn bitcoin_liquid_v2_chain() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let create_chain_response = boltz_api_v2.post_chain_req(create_chain_req).unwrap();
+    let create_chain_response = boltz_api_v2.post_chain_req(create_chain_req).await.unwrap();
     let swap_id = create_chain_response.clone().id;
     let lockup_details: ChainSwapDetails = create_chain_response.clone().lockup_details;
 
@@ -159,6 +159,7 @@ fn bitcoin_liquid_v2_chain() {
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
                         let refund_tx = BtcSwapTx::new_refund(
                             lockup_script.clone(),
@@ -167,9 +168,12 @@ fn bitcoin_liquid_v2_chain() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
-                        let claim_tx_response =
-                            boltz_api_v2.get_chain_claim_tx_details(&swap_id).unwrap();
+                        let claim_tx_response = boltz_api_v2
+                            .get_chain_claim_tx_details(&swap_id)
+                            .await
+                            .unwrap();
                         let (partial_sig, pub_nonce) = refund_tx
                             .partial_sign(
                                 &our_refund_keys,
@@ -190,10 +194,12 @@ fn bitcoin_liquid_v2_chain() {
                                 }),
                                 false,
                             )
+                            .await
                             .unwrap();
 
                         claim_tx
                             .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .await
                             .unwrap();
 
                         log::info!("Succesfully broadcasted claim tx!");
@@ -216,7 +222,8 @@ fn bitcoin_liquid_v2_chain() {
                             our_refund_keys,
                             boltz_api_v2.clone(),
                             100,
-                        );
+                        )
+                        .await;
                         log::info!("REFUNDING with higher fee");
                         refund_bitcoin_liquid_v2_chain(
                             lockup_script.clone(),
@@ -225,7 +232,8 @@ fn bitcoin_liquid_v2_chain() {
                             our_refund_keys,
                             boltz_api_v2.clone(),
                             1000,
-                        );
+                        )
+                        .await;
                     }
                 }
 
@@ -248,7 +256,7 @@ fn bitcoin_liquid_v2_chain() {
     }
 }
 
-fn refund_bitcoin_liquid_v2_chain(
+async fn refund_bitcoin_liquid_v2_chain(
     lockup_script: BtcSwapScript,
     refund_address: String,
     swap_id: String,
@@ -263,6 +271,7 @@ fn refund_bitcoin_liquid_v2_chain(
         BOLTZ_TESTNET_URL_V2.to_owned(),
         swap_id.clone(),
     )
+    .await
     .unwrap();
     let tx = refund_tx
         .sign_refund(
@@ -275,6 +284,7 @@ fn refund_bitcoin_liquid_v2_chain(
                 partial_sig: None,
             }),
         )
+        .await
         .unwrap();
 
     refund_tx
@@ -285,9 +295,9 @@ fn refund_bitcoin_liquid_v2_chain(
     log::debug!("Refund Tx {:?}", tx);
 }
 
-#[test]
+#[tokio::test]
 #[ignore]
-fn liquid_bitcoin_v2_chain() {
+async fn liquid_bitcoin_v2_chain() {
     setup_logger();
     let network = Chain::LiquidTestnet;
     let secp = Secp256k1::new();
@@ -322,7 +332,7 @@ fn liquid_bitcoin_v2_chain() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let create_chain_response = boltz_api_v2.post_chain_req(create_chain_req).unwrap();
+    let create_chain_response = boltz_api_v2.post_chain_req(create_chain_req).await.unwrap();
     let swap_id = create_chain_response.clone().id;
     let lockup_details: ChainSwapDetails = create_chain_response.clone().lockup_details;
 
@@ -427,6 +437,7 @@ fn liquid_bitcoin_v2_chain() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
                         let refund_tx = LBtcSwapTx::new_refund(
                             lockup_script.clone(),
@@ -435,9 +446,12 @@ fn liquid_bitcoin_v2_chain() {
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
-                        let claim_tx_response =
-                            boltz_api_v2.get_chain_claim_tx_details(&swap_id).unwrap();
+                        let claim_tx_response = boltz_api_v2
+                            .get_chain_claim_tx_details(&swap_id)
+                            .await
+                            .unwrap();
                         let (partial_sig, pub_nonce) = refund_tx
                             .partial_sign(
                                 &our_refund_keys,
@@ -457,6 +471,7 @@ fn liquid_bitcoin_v2_chain() {
                                     partial_sig: Some(partial_sig),
                                 }),
                             )
+                            .await
                             .unwrap();
 
                         claim_tx
@@ -482,6 +497,7 @@ fn liquid_bitcoin_v2_chain() {
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
                         let tx = refund_tx
                             .sign_refund(
@@ -495,10 +511,12 @@ fn liquid_bitcoin_v2_chain() {
                                 }),
                                 false,
                             )
+                            .await
                             .unwrap();
 
                         refund_tx
                             .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .await
                             .unwrap();
 
                         log::info!("Succesfully broadcasted claim tx!");

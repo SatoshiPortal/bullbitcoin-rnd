@@ -432,7 +432,7 @@ impl LBtcSwapScript {
     }
 
     /// Fetch utxo for script from BoltzApi
-    pub fn fetch_lockup_utxo_boltz(
+    pub async fn fetch_lockup_utxo_boltz(
         &self,
         network_config: &ElectrumConfig,
         boltz_url: &str,
@@ -444,7 +444,8 @@ impl LBtcSwapScript {
             SwapType::Chain => match tx_kind {
                 SwapTxKind::Claim => {
                     boltz_client
-                        .get_chain_txs(swap_id)?
+                        .get_chain_txs(swap_id)
+                        .await?
                         .server_lock
                         .ok_or(Error::Protocol(
                             "No server_lock transaction for Chain Swap available".to_string(),
@@ -454,7 +455,8 @@ impl LBtcSwapScript {
                 }
                 SwapTxKind::Refund => {
                     boltz_client
-                        .get_chain_txs(swap_id)?
+                        .get_chain_txs(swap_id)
+                        .await?
                         .user_lock
                         .ok_or(Error::Protocol(
                             "No user_lock transaction for Chain Swap available".to_string(),
@@ -463,8 +465,8 @@ impl LBtcSwapScript {
                         .hex
                 }
             },
-            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id)?.hex,
-            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id)?.hex,
+            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id).await?.hex,
+            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id).await?.hex,
         };
         if (hex.is_none()) {
             return Err(Error::Hex(
@@ -518,7 +520,7 @@ pub struct LBtcSwapTx {
 
 impl LBtcSwapTx {
     /// Craft a new ClaimTx. Only works for Reverse and Chain Swaps.
-    pub fn new_claim(
+    pub async fn new_claim(
         swap_script: LBtcSwapScript,
         output_address: String,
         network_config: &ElectrumConfig,
@@ -533,12 +535,16 @@ impl LBtcSwapTx {
 
         let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config) {
             Ok(r) => r,
-            Err(_) => swap_script.fetch_lockup_utxo_boltz(
-                network_config,
-                &boltz_url,
-                &swap_id,
-                SwapTxKind::Claim,
-            )?,
+            Err(_) => {
+                swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Claim,
+                    )
+                    .await?
+            }
         };
 
         let electrum = network_config.build_client()?;
@@ -555,7 +561,7 @@ impl LBtcSwapTx {
     }
 
     /// Construct a RefundTX corresponding to the swap_script. Only works for Submarine and Chain Swaps.
-    pub fn new_refund(
+    pub async fn new_refund(
         swap_script: LBtcSwapScript,
         output_address: &str,
         network_config: &ElectrumConfig,
@@ -571,12 +577,16 @@ impl LBtcSwapTx {
         let address = Address::from_str(output_address)?;
         let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config) {
             Ok(r) => r,
-            Err(_) => swap_script.fetch_lockup_utxo_boltz(
-                network_config,
-                &boltz_url,
-                &swap_id,
-                SwapTxKind::Refund,
-            )?,
+            Err(_) => {
+                swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Refund,
+                    )
+                    .await?
+            }
         };
 
         let electrum = network_config.build_client()?;
@@ -645,12 +655,12 @@ impl LBtcSwapTx {
     /// Panics if called on a Submarine Swap or Refund Tx.
     /// If the claim is cooperative, provide the other party's partial sigs.
     /// If this is None, transaction will be claimed via taproot script path.
-    pub fn sign_claim(
+    pub async fn sign_claim(
         &self,
         keys: &Keypair,
         preimage: &Preimage,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
         is_discount_ct: bool,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::Submarine {
@@ -718,27 +728,35 @@ impl LBtcSwapTx {
             let claim_tx_hex = serialize(&claim_tx).to_lower_hex_string();
             let partial_sig_resp = match self.swap_script.swap_type {
                 SwapType::Chain => match (pub_nonce, partial_sig) {
-                    (Some(pub_nonce), Some(partial_sig)) => boltz_api.post_chain_claim_tx_details(
-                        &swap_id,
-                        preimage,
-                        pub_nonce,
-                        partial_sig,
-                        ToSign {
-                            pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
-                            transaction: claim_tx_hex,
-                            index: 0,
-                        },
-                    ),
+                    (Some(pub_nonce), Some(partial_sig)) => {
+                        boltz_api
+                            .post_chain_claim_tx_details(
+                                &swap_id,
+                                preimage,
+                                pub_nonce,
+                                partial_sig,
+                                ToSign {
+                                    pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
+                                    transaction: claim_tx_hex,
+                                    index: 0,
+                                },
+                            )
+                            .await
+                    }
                     _ => Err(Error::Protocol(
                         "Chain swap claim needs a partial_sig".to_string(),
                     )),
                 },
-                SwapType::ReverseSubmarine => boltz_api.get_reverse_partial_sig(
-                    &swap_id,
-                    preimage,
-                    &claim_pub_nonce,
-                    &claim_tx_hex,
-                ),
+                SwapType::ReverseSubmarine => {
+                    boltz_api
+                        .get_reverse_partial_sig(
+                            &swap_id,
+                            preimage,
+                            &claim_pub_nonce,
+                            &claim_tx_hex,
+                        )
+                        .await
+                }
                 _ => Err(Error::Protocol(format!(
                     "Cannot get partial sig for {:?} Swap",
                     self.swap_script.swap_type
@@ -946,11 +964,11 @@ impl LBtcSwapTx {
 
     /// Sign a refund transaction.
     /// Panics if called on a Reverse Swap or Claim Tx.
-    pub fn sign_refund(
+    pub async fn sign_refund(
         &self,
         keys: &Keypair,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
         is_discount_ct: bool,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::ReverseSubmarine {
@@ -1017,10 +1035,14 @@ impl LBtcSwapTx {
             let refund_tx_hex = serialize(&refund_tx).to_lower_hex_string();
             let partial_sig_resp = match self.swap_script.swap_type {
                 SwapType::Chain => {
-                    boltz_api.get_chain_partial_sig(&swap_id, 0, &pub_nonce, &refund_tx_hex)
+                    boltz_api
+                        .get_chain_partial_sig(&swap_id, 0, &pub_nonce, &refund_tx_hex)
+                        .await
                 }
                 SwapType::Submarine => {
-                    boltz_api.get_submarine_partial_sig(&swap_id, 0, &pub_nonce, &refund_tx_hex)
+                    boltz_api
+                        .get_submarine_partial_sig(&swap_id, 0, &pub_nonce, &refund_tx_hex)
+                        .await
                 }
                 _ => Err(Error::Protocol(format!(
                     "Cannot get partial sig for {:?} Swap",
@@ -1282,7 +1304,7 @@ impl LBtcSwapTx {
     }
 
     /// Broadcast transaction to the network
-    pub fn broadcast(
+    pub async fn broadcast(
         &self,
         signed_tx: &Transaction,
         network_config: &ElectrumConfig,
@@ -1291,7 +1313,7 @@ impl LBtcSwapTx {
         if let Some((boltz_api, chain)) = is_lowball {
             log::info!("Attempting lowball broadcast");
             let tx_hex = serialize(signed_tx).to_lower_hex_string();
-            let response = boltz_api.broadcast_tx(chain, &tx_hex)?;
+            let response = boltz_api.broadcast_tx(chain, &tx_hex).await?;
 
             match response.as_object() {
                 None => Err(Error::Protocol("Invalid broadcast reply".to_string())),

@@ -88,8 +88,8 @@ impl From<bitcoin::secp256k1::Error> for Error {
     }
 }
 
-impl From<ureq::Error> for Error {
-    fn from(value: ureq::Error) -> Self {
+impl From<reqwest::Error> for Error {
+    fn from(value: reqwest::Error) -> Self {
         Self::HTTP(value.to_string())
     }
 }

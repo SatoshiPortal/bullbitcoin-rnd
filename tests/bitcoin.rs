@@ -24,9 +24,9 @@ use boltz_client::fees::Fee;
 
 pub mod test_utils;
 
-#[test]
+#[tokio::test]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_submarine() {
+async fn bitcoin_v2_submarine() {
     setup_logger();
 
     let secp = bitcoin::secp256k1::Secp256k1::new();
@@ -61,7 +61,7 @@ fn bitcoin_v2_submarine() {
         webhook: None,
     };
 
-    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).unwrap();
+    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).await.unwrap();
 
     log::info!("Got Swap Response from Boltz server");
 
@@ -141,10 +141,12 @@ fn bitcoin_v2_submarine() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
+                        .await
                         .expect("Funding UTXO not found");
 
                         let claim_tx_response = boltz_api_v2
                             .get_submarine_claim_tx_details(swap_id)
+                            .await
                             .unwrap();
 
                         log::debug!("Received claim tx details : {:?}", claim_tx_response);
@@ -168,6 +170,7 @@ fn bitcoin_v2_submarine() {
                             .unwrap();
                         boltz_api_v2
                             .post_submarine_claim_tx_details(swap_id, pub_nonce, partial_sig)
+                            .await
                             .unwrap();
                         log::info!("Successfully Sent partial signature");
                     }
@@ -189,18 +192,22 @@ fn bitcoin_v2_submarine() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
+                        .await
                         .expect("Funding UTXO not found");
 
-                        match swap_tx.sign_refund(
-                            &our_keys,
-                            Fee::Absolute(1000),
-                            Some(Cooperative {
-                                boltz_api: &boltz_api_v2,
-                                swap_id: swap_id.clone(),
-                                pub_nonce: None,
-                                partial_sig: None,
-                            }),
-                        ) {
+                        match swap_tx
+                            .sign_refund(
+                                &our_keys,
+                                Fee::Absolute(1000),
+                                Some(Cooperative {
+                                    boltz_api: &boltz_api_v2,
+                                    swap_id: swap_id.clone(),
+                                    pub_nonce: None,
+                                    partial_sig: None,
+                                }),
+                            )
+                            .await
+                        {
                             Ok(tx) => {
                                 let txid = swap_tx
                                     .broadcast(&tx, &ElectrumConfig::default_bitcoin())
@@ -213,6 +220,7 @@ fn bitcoin_v2_submarine() {
 
                                 let tx = swap_tx
                                     .sign_refund(&our_keys, Fee::Absolute(1000), None)
+                                    .await
                                     .unwrap();
                                 let txid = swap_tx
                                     .broadcast(&tx, &ElectrumConfig::default_bitcoin())
@@ -245,9 +253,9 @@ fn bitcoin_v2_submarine() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_reverse() {
+async fn bitcoin_v2_reverse() {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -279,9 +287,13 @@ fn bitcoin_v2_reverse() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
 
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -350,6 +362,7 @@ fn bitcoin_v2_reverse() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.clone(),
                         )
+                        .await
                         .expect("Funding tx expected");
 
                         let tx = claim_tx
@@ -364,6 +377,7 @@ fn bitcoin_v2_reverse() {
                                     partial_sig: None,
                                 }),
                             )
+                            .await
                             .unwrap();
 
                         claim_tx
@@ -395,9 +409,9 @@ fn bitcoin_v2_reverse() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_reverse_script_path() {
+async fn bitcoin_v2_reverse_script_path() {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -429,9 +443,13 @@ fn bitcoin_v2_reverse_script_path() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
     let swap_id = reverse_resp.id.clone();
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -502,10 +520,12 @@ fn bitcoin_v2_reverse_script_path() {
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id,
                         )
+                        .await
                         .expect("Funding tx expected");
 
                         let tx = claim_tx
                             .sign_claim(&our_keys, &preimage, Fee::Absolute(1000), None)
+                            .await
                             .unwrap();
 
                         claim_tx
