@@ -32,11 +32,10 @@ env_logger = "0.7"
 hex = "0.4"
 lnurl-rs = { version = "0.8.0", optional = true }
 reqwest = { version = "0.12.12", features = ["json"] }
+tokio-tungstenite-wasm = { version = "0.5.0", features = ["native-tls"] }
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
 electrum-client = { version = "0.21.0", default-features = false, features = ["use-rustls-ring", "proxy"] }
-tungstenite = { version = "0.21.0", features = ["native-tls-vendored"] }
-native-tls = "0.2.11"
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
@@ -44,6 +43,9 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [patch.crates-io]
 secp256k1-zkp = { git = "https://github.com/danielgranhao/rust-secp256k1-zkp.git", rev = "e02a6d611f2844e0fb158537b4b3824d0341db61" }
+
+[dev-dependencies]
+futures-util = "0.3.31"
 
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
 bitcoind = { version = "0.36.0", features = ["25_0"] }
@@ -56,6 +58,3 @@ wasm-bindgen-test = "0.3.50"
 [features]
 default = []
 lnurl = ["dep:lnurl-rs"]
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }

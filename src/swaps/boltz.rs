@@ -28,7 +28,6 @@ use std::fmt::{Display, Formatter, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::format, net::TcpStream};
-use tungstenite::{connect, http::response, stream::MaybeTlsStream, WebSocket};
 
 use crate::{error::Error, network::Chain, util::secrets::Preimage};
 use crate::{BtcSwapScript, LBtcSwapScript};
@@ -43,6 +42,8 @@ use elements::secp256k1_zkp::{
     MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
     MusigSessionId,
 };
+pub use tokio_tungstenite_wasm::Message as WsMessage;
+use tokio_tungstenite_wasm::{connect, WebSocketStream};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HeightResponse {
@@ -326,11 +327,9 @@ impl BoltzApiClientV2 {
     }
 
     /// Returns the web socket connection to the boltz server
-    pub fn connect_ws(&self) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, Error> {
+    pub async fn connect_ws(&self) -> Result<WebSocketStream, Error> {
         let ws_string = self.base_url.clone().replace("http", "ws") + "/ws";
-        let (socket, response) = connect(Url::parse(&ws_string)?)?;
-        log::debug!("websocket response: {:?}", response);
-        Ok(socket)
+        Ok(connect(ws_string).await?)
     }
 
     /// Make a get request. returns the Response

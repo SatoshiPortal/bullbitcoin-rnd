@@ -22,7 +22,7 @@ pub enum Error {
     Hash(bitcoin::hashes::FromSliceError),
     Locktime(String),
     Url(url::ParseError),
-    WebSocket(tungstenite::Error),
+    WebSocket(tokio_tungstenite_wasm::Error),
     Taproot(String),
     Musig2(String),
     Generic(String),
@@ -178,8 +178,8 @@ impl From<url::ParseError> for Error {
     }
 }
 
-impl From<tungstenite::Error> for Error {
-    fn from(value: tungstenite::Error) -> Self {
+impl From<tokio_tungstenite_wasm::Error> for Error {
+    fn from(value: tokio_tungstenite_wasm::Error) -> Self {
         Self::WebSocket(value)
     }
 }

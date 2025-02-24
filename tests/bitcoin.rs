@@ -21,6 +21,8 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
@@ -73,19 +75,21 @@ async fn bitcoin_v2_submarine() {
     log::debug!("Created Swap Script. : {:?}", swap_script);
 
     // Subscribe to websocket updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&Subscription::new(&swap_id.clone())).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = &swap_id.clone();
 
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -303,20 +307,20 @@ async fn bitcoin_v2_reverse() {
         BtcSwapScript::reverse_from_swap_resp(&reverse_resp, claim_public_key).unwrap();
     let swap_id = reverse_resp.id.clone();
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = reverse_resp.id.clone();
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
                 continue;
@@ -459,21 +463,21 @@ async fn bitcoin_v2_reverse_script_path() {
         BtcSwapScript::reverse_from_swap_resp(&reverse_resp, claim_public_key).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id.clone());
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = reverse_resp.id.clone();
 
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {

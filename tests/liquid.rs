@@ -22,6 +22,8 @@ use bitcoin::{
 };
 use boltz_client::fees::Fee;
 use elements::encode::serialize;
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
@@ -80,17 +82,19 @@ async fn liquid_v2_submarine() {
     log::debug!("Created Swap Script. : {:?}", swap_script);
 
     // Subscribe to websocket updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
+    sender
+        .send(Message::text(
             serde_json::to_string(&Subscription::new(&create_swap_response.id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -323,19 +327,19 @@ async fn liquid_v2_reverse() {
     swap_script.to_address(Chain::LiquidTestnet).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -500,19 +504,19 @@ async fn liquid_v2_reverse_script_path() {
     swap_script.to_address(Chain::LiquidTestnet).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {

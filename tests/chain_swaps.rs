@@ -12,7 +12,9 @@ use boltz_client::{
     BtcSwapScript, BtcSwapTx, Keypair, LBtcSwapScript, LBtcSwapTx, Secp256k1,
 };
 use elements::Address as EAddress;
+use futures_util::{SinkExt, StreamExt};
 use std::str::FromStr;
+use tokio_tungstenite_wasm::Message;
 
 #[tokio::test]
 #[ignore]
@@ -91,17 +93,19 @@ async fn bitcoin_liquid_v2_chain() {
     // assert_eq!(claim_address.to_string(), claim_details.claim_address.unwrap());
     let liquid_genesis_hash = liquid_genesis_hash(&ElectrumConfig::default_liquid()).unwrap();
     log::debug!("{:#?}", liquid_genesis_hash);
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
+    sender
+        .send(Message::text(
             serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
     loop {
         let swap_id = swap_id.clone();
 
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("Error in websocket respo").is_eof() {
@@ -371,15 +375,17 @@ async fn liquid_bitcoin_v2_chain() {
 
     let claim_address = "tb1qra2cdypld3hyq3f84630cvj9d0lmzv66vn4k28".to_string();
 
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
+    sender
+        .send(Message::text(
             serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("Error in websocket respo").is_eof() {
