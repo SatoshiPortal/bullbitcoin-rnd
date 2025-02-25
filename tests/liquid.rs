@@ -1,7 +1,8 @@
+use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
 use boltz_client::{
-    network::{electrum::ElectrumConfig, Chain},
+    network::Chain,
     swaps::{
         boltz::{
             BoltzApiClientV2, Cooperative, CreateReverseRequest, CreateSubmarineRequest,
@@ -21,15 +22,37 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "electrum")]
+use boltz_client::network::electrum::ElectrumConfig;
+use boltz_client::network::{LiquidClient, LiquidNetworkConfig};
 use elements::encode::serialize;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
-#[tokio::test]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn liquid_v2_submarine() {
+async fn liquid_v2_submarine_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_submarine(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_submarine_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_submarine(liquid_network_config).await
+}
+
+async fn liquid_v2_submarine<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -142,7 +165,7 @@ async fn liquid_v2_submarine() {
                         let swap_tx = LBtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default(chain, None).unwrap(),
+                            &liquid_network_config,
                             boltz_url.to_string(),
                             create_swap_response.clone().id,
                         )
@@ -193,7 +216,7 @@ async fn liquid_v2_submarine() {
                         let swap_tx = LBtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default(chain, None).unwrap(),
+                            &liquid_network_config,
                             boltz_url.to_string(),
                             create_swap_response.clone().id,
                         )
@@ -218,7 +241,7 @@ async fn liquid_v2_submarine() {
                             Ok(tx) => {
                                 println!("{}", tx.serialize().to_lower_hex_string());
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                                    .broadcast(&tx, &liquid_network_config, None)
                                     .await
                                     .unwrap();
                                 log::info!("Cooperative Refund Successfully broadcasted: {}", txid);
@@ -232,7 +255,7 @@ async fn liquid_v2_submarine() {
                                     .await
                                     .unwrap();
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                                    .broadcast(&tx, &liquid_network_config, None)
                                     .await
                                     .unwrap();
                                 log::info!(
@@ -268,9 +291,24 @@ async fn liquid_v2_submarine() {
     }
 }
 
-#[tokio::test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn liquid_v2_reverse() {
+async fn liquid_v2_reverse_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_reverse(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_reverse_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_reverse(liquid_network_config).await
+}
+
+async fn liquid_v2_reverse<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -382,7 +420,7 @@ async fn liquid_v2_reverse() {
                         let claim_tx = LBtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_liquid(),
+                            &liquid_network_config,
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
@@ -407,7 +445,7 @@ async fn liquid_v2_reverse() {
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .broadcast(&tx, &liquid_network_config, None)
                             .await
                             .unwrap();
 
@@ -445,9 +483,24 @@ async fn liquid_v2_reverse() {
     }
 }
 
-#[tokio::test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn liquid_v2_reverse_script_path() {
+async fn liquid_v2_reverse_script_path_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_reverse_script_path(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_reverse_script_path_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_reverse_script_path(liquid_network_config).await
+}
+
+async fn liquid_v2_reverse_script_path<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -559,7 +612,7 @@ async fn liquid_v2_reverse_script_path() {
                         let claim_tx = LBtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_liquid(),
+                            &liquid_network_config,
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
@@ -572,7 +625,7 @@ async fn liquid_v2_reverse_script_path() {
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .broadcast(&tx, &liquid_network_config, None)
                             .await
                             .unwrap();
 
@@ -610,11 +663,26 @@ async fn liquid_v2_reverse_script_path() {
     }
 }
 
+#[macros::async_test]
+#[cfg(feature = "electrum")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn test_recover_liquidv2_refund_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    test_recover_liquidv2_refund(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn test_recover_liquidv2_refund_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    test_recover_liquidv2_refund(liquid_network_config).await
+}
+
 // _$SwapTxSensitiveImpl (SwapTxSensitive(id: xJ9E5spWSbmw, secretKey: 5c2c8120ff354ed8b6440121c621b0395d7cccc839a6200cf0b8208e19483ed1, publicKey: 0273daf3d9728b7bd7a716fdf4b05b4b12a0febd570f8b708bfcffc1026e2c0f47, preimage: , sha256: 451f1df5a5ccc1e487cf691c21c1b90737557a9df3171a69aaa6dc1578bc6be4, hash160: 726bbbe8393827392d21445922ee87b254c07285, redeemScript: redeemScript, boltzPubkey: 0329724923c9a845eb044fa4ff323f850af6b995185b2cc18335d896011f894acd, isSubmarine: true, scriptAddress: null, locktime: 2868372, blindingKey: 1b581bed3300b146c61bdb3e5b58413f85299b71ab36401a8e02ec38d57925aa))
 
-#[tokio::test]
-#[ignore]
-async fn test_recover_liquidv2_refund() {
+async fn test_recover_liquidv2_refund<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let id = "xJ9E5spWSbmw".to_string();
@@ -641,7 +709,7 @@ async fn test_recover_liquidv2_refund() {
     let blinding_key =
         "1b581bed3300b146c61bdb3e5b58413f85299b71ab36401a8e02ec38d57925aa".to_string();
     let absolute_fees = 1_200;
-    let network_config = ElectrumConfig::default(Chain::Liquid, None).unwrap();
+    let network_config = liquid_network_config;
     let swap_script: LBtcSwapScript = create_swap_script_v2(
         script_address,
         preimage.hash160.to_string(),

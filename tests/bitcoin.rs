@@ -1,7 +1,11 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "electrum")]
+use boltz_client::network::electrum::ElectrumConfig;
+use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
 use boltz_client::{
-    network::{electrum::ElectrumConfig, Chain},
+    network::Chain,
     swaps::{
         boltz::{
             BoltzApiClientV2, Cooperative, CreateReverseRequest, CreateSubmarineRequest,
@@ -21,14 +25,34 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
+use boltz_client::network::{BitcoinClient, BitcoinNetworkConfig};
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
-#[tokio::test]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn bitcoin_v2_submarine() {
+async fn bitcoin_v2_submarine_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_submarine(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+
+async fn bitcoin_v2_submarine_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_submarine(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_submarine<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = bitcoin::secp256k1::Secp256k1::new();
@@ -141,7 +165,7 @@ async fn bitcoin_v2_submarine() {
                         let swap_tx = BtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
@@ -192,7 +216,7 @@ async fn bitcoin_v2_submarine() {
                         let swap_tx = BtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
@@ -214,7 +238,8 @@ async fn bitcoin_v2_submarine() {
                         {
                             Ok(tx) => {
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                                    .broadcast(&tx, &bitcoin_network_config)
+                                    .await
                                     .unwrap();
                                 log::info!("Cooperative Refund Successfully broadcasted: {}", txid);
                             }
@@ -227,7 +252,8 @@ async fn bitcoin_v2_submarine() {
                                     .await
                                     .unwrap();
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                                    .broadcast(&tx, &bitcoin_network_config)
+                                    .await
                                     .unwrap();
                                 log::info!(
                                     "Non-cooperative Refund Successfully broadcasted: {}",
@@ -257,9 +283,24 @@ async fn bitcoin_v2_submarine() {
     }
 }
 
-#[tokio::test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn bitcoin_v2_reverse() {
+async fn bitcoin_v2_reverse_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_reverse(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn bitcoin_v2_reverse_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_reverse(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_reverse<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -362,7 +403,7 @@ async fn bitcoin_v2_reverse() {
                         let claim_tx = BtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.clone(),
                         )
@@ -385,7 +426,8 @@ async fn bitcoin_v2_reverse() {
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                            .broadcast(&tx, &bitcoin_network_config)
+                            .await
                             .unwrap();
 
                         log::info!("Successfully broadcasted claim tx!");
@@ -413,9 +455,24 @@ async fn bitcoin_v2_reverse() {
     }
 }
 
-#[tokio::test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-async fn bitcoin_v2_reverse_script_path() {
+async fn bitcoin_v2_reverse_script_path_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_reverse_script_path(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn bitcoin_v2_reverse_script_path_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_reverse_script_path(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_reverse_script_path<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -520,7 +577,7 @@ async fn bitcoin_v2_reverse_script_path() {
                         let claim_tx = BtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id,
                         )
@@ -533,7 +590,8 @@ async fn bitcoin_v2_reverse_script_path() {
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                            .broadcast(&tx, &bitcoin_network_config)
+                            .await
                             .unwrap();
 
                         log::info!("Successfully broadcasted claim tx!");

@@ -1,3 +1,5 @@
+#![cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+
 use bitcoin::absolute::LockTime;
 use bitcoin::key::rand::thread_rng;
 use bitcoin::key::{Keypair, PublicKey};

@@ -18,7 +18,7 @@ cargo-test:
 	cargo test
 
 wasm-clippy:
-	$(CLANG_PREFIX) cargo clippy --target=wasm32-unknown-unknown -- -D warnings
+	$(CLANG_PREFIX) cargo clippy --target=wasm32-unknown-unknown --all-features -- -D warnings
 
 wasm-test:
 	$(CLANG_PREFIX) wasm-pack test --headless --firefox

@@ -1,4 +1,3 @@
-use electrum_client::ElectrumApi;
 use std::{hash, str::FromStr};
 
 use bitcoin::{
@@ -25,10 +24,7 @@ use elements::{
 use elements::encode::serialize;
 use elements::secp256k1_zkp::Message;
 
-use crate::{
-    network::{electrum::ElectrumConfig, Chain},
-    util::{liquid_genesis_hash, secrets::Preimage},
-};
+use crate::{network::Chain, util::secrets::Preimage};
 
 use crate::error::Error;
 
@@ -37,6 +33,7 @@ use super::boltz::{
     CreateSubmarineResponse, Side, SubmarineClaimTxResponse, SwapTxKind, SwapType, ToSign,
 };
 use crate::fees::{create_tx_with_fee, Fee};
+use crate::network::{BitcoinClient, BitcoinNetworkConfig, LiquidClient, LiquidNetworkConfig};
 use elements::bitcoin::PublicKey;
 use elements::secp256k1_zkp::Keypair as ZKKeyPair;
 use elements::{
@@ -404,37 +401,19 @@ impl LBtcSwapScript {
     }
 
     /// Fetch utxo for script from Electrum
-    pub fn fetch_utxo(&self, network_config: &ElectrumConfig) -> Result<(OutPoint, TxOut), Error> {
-        let electrum_client = network_config.clone().build_client()?;
+    pub async fn fetch_utxo<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
+        &self,
+        network_config: &N,
+    ) -> Result<(OutPoint, TxOut), Error> {
+        let client = network_config.build_liquid_client()?;
         let address = self.to_address(network_config.network())?;
-        let history = electrum_client.script_get_history(BitcoinScript::from_bytes(
-            self.to_address(network_config.network())?
-                .to_unconfidential()
-                .script_pubkey()
-                .as_bytes(),
-        ))?;
-        if history.is_empty() {
-            return Err(Error::Protocol("No Transaction History".to_string()));
-        }
-        let bitcoin_txid = history.last().expect("txid expected").tx_hash;
-        let raw_tx = electrum_client.transaction_get_raw(&bitcoin_txid)?;
-        let tx: Transaction = elements::encode::deserialize(&raw_tx)?;
-        for (vout, output) in tx.clone().output.into_iter().enumerate() {
-            if output.script_pubkey == address.script_pubkey() {
-                let outpoint_0 = OutPoint::new(tx.txid(), vout as u32);
-
-                return Ok((outpoint_0, output));
-            }
-        }
-        Err(Error::Protocol(
-            "Electrum could not find a Liquid UTXO for script".to_string(),
-        ))
+        client.get_address_utxo(&address).await
     }
 
     /// Fetch utxo for script from BoltzApi
-    pub async fn fetch_lockup_utxo_boltz(
+    pub async fn fetch_lockup_utxo_boltz<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
         &self,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: &str,
         swap_id: &str,
         tx_kind: SwapTxKind,
@@ -488,14 +467,12 @@ impl LBtcSwapScript {
     }
 
     // Get the chain genesis hash. Requires for sighash calculation
-    pub fn genesis_hash(
+    pub async fn genesis_hash<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
         &self,
-        electrum_config: &ElectrumConfig,
+        electrum_config: &N,
     ) -> Result<elements::BlockHash, Error> {
-        let electrum = electrum_config.build_client()?;
-        Ok(elements::BlockHash::from_raw_hash(
-            electrum.block_header(0)?.block_hash().into(),
-        ))
+        let client = electrum_config.build_liquid_client()?;
+        client.get_genesis_hash().await
     }
 }
 
@@ -520,10 +497,10 @@ pub struct LBtcSwapTx {
 
 impl LBtcSwapTx {
     /// Craft a new ClaimTx. Only works for Reverse and Chain Swaps.
-    pub async fn new_claim(
+    pub async fn new_claim<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
         swap_script: LBtcSwapScript,
         output_address: String,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<LBtcSwapTx, Error> {
@@ -533,7 +510,7 @@ impl LBtcSwapTx {
             ));
         }
 
-        let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config) {
+        let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config).await {
             Ok(r) => r,
             Err(_) => {
                 swap_script
@@ -547,8 +524,10 @@ impl LBtcSwapTx {
             }
         };
 
-        let electrum = network_config.build_client()?;
-        let genesis_hash = liquid_genesis_hash(network_config)?;
+        let genesis_hash = network_config
+            .build_liquid_client()?
+            .get_genesis_hash()
+            .await?;
 
         Ok(LBtcSwapTx {
             kind: SwapTxKind::Claim,
@@ -561,10 +540,10 @@ impl LBtcSwapTx {
     }
 
     /// Construct a RefundTX corresponding to the swap_script. Only works for Submarine and Chain Swaps.
-    pub async fn new_refund(
+    pub async fn new_refund<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
         swap_script: LBtcSwapScript,
         output_address: &str,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<LBtcSwapTx, Error> {
@@ -575,7 +554,7 @@ impl LBtcSwapTx {
         }
 
         let address = Address::from_str(output_address)?;
-        let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config) {
+        let (funding_outpoint, funding_utxo) = match swap_script.fetch_utxo(network_config).await {
             Ok(r) => r,
             Err(_) => {
                 swap_script
@@ -589,8 +568,10 @@ impl LBtcSwapTx {
             }
         };
 
-        let electrum = network_config.build_client()?;
-        let genesis_hash = liquid_genesis_hash(network_config)?;
+        let genesis_hash = network_config
+            .build_liquid_client()?
+            .get_genesis_hash()
+            .await?;
 
         Ok(LBtcSwapTx {
             kind: SwapTxKind::Refund,
@@ -1304,10 +1285,10 @@ impl LBtcSwapTx {
     }
 
     /// Broadcast transaction to the network
-    pub async fn broadcast(
+    pub async fn broadcast<LC: LiquidClient, N: LiquidNetworkConfig<LC>>(
         &self,
         signed_tx: &Transaction,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         is_lowball: Option<(&BoltzApiClientV2, Chain)>,
     ) -> Result<String, Error> {
         if let Some((boltz_api, chain)) = is_lowball {
@@ -1332,11 +1313,8 @@ impl LBtcSwapTx {
                 },
             }
         } else {
-            let electrum_client = network_config.build_client()?;
-            let serialized = serialize(signed_tx);
-            Ok(electrum_client
-                .transaction_broadcast_raw(&serialized)?
-                .to_string())
+            let client = network_config.build_liquid_client()?;
+            client.broadcast_tx(signed_tx).await
         }
     }
 }

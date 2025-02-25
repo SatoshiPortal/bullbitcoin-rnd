@@ -15,18 +15,13 @@ use bitcoin::{
 };
 use bitcoin::{sighash::SighashCache, Network, Sequence, Transaction, TxIn, TxOut, Witness};
 use bitcoin::{Amount, EcdsaSighashType, TapLeafHash, TapSighashType, Txid, XOnlyPublicKey};
-use electrum_client::{ElectrumApi, GetHistoryRes};
 use elements::encode::serialize;
 use elements::pset::serialize::Serialize;
 use std::collections::HashMap;
 use std::ops::{Add, Index};
 use std::str::FromStr;
 
-use crate::{
-    error::Error,
-    network::{electrum::ElectrumConfig, Chain},
-    util::secrets::Preimage,
-};
+use crate::{error::Error, network::Chain, util::secrets::Preimage};
 use crate::{LBtcSwapScript, LBtcSwapTx};
 
 use bitcoin::{blockdata::locktime::absolute::LockTime, hashes::hash160};
@@ -37,6 +32,7 @@ use super::boltz::{
     SwapTxKind, SwapType, ToSign,
 };
 
+use crate::network::{BitcoinClient, BitcoinNetworkConfig};
 use crate::util::fees::{create_tx_with_fee, Fee};
 use elements::secp256k1_zkp::{
     musig, MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
@@ -395,76 +391,31 @@ impl BtcSwapScript {
     }
 
     /// Get the balance of the script
-    pub fn get_balance(&self, network_config: &ElectrumConfig) -> Result<(u64, i64), Error> {
-        let electrum_client = network_config.build_client()?;
-        let spk = self.to_address(network_config.network())?.script_pubkey();
-        let script_balance = electrum_client.script_get_balance(spk.as_script())?;
-        Ok((script_balance.confirmed, script_balance.unconfirmed))
+    pub async fn get_balance<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
+        &self,
+        network_config: &N,
+    ) -> Result<(u64, i64), Error> {
+        let client = network_config.build_bitcoin_client()?;
+        client
+            .get_address_balance(&self.to_address(network_config.network())?)
+            .await
     }
 
     /// Fetch (utxo,amount) pairs for all utxos of the script_pubkey of this swap.
-    pub fn fetch_utxos(
+    pub async fn fetch_utxos<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
-        network_config: &ElectrumConfig,
+        network_config: &N,
     ) -> Result<Vec<(OutPoint, TxOut)>, Error> {
-        let electrum_client = network_config.build_client()?;
-        let spk = self.to_address(network_config.network())?.script_pubkey();
-        let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
-
-        let txs = electrum_client
-            .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
-
-        Ok(Self::fetch_utxos_core(&txs, &history, &spk))
-    }
-
-    fn fetch_utxos_core(
-        txs: &[Transaction],
-        history: &[GetHistoryRes],
-        spk: &ScriptBuf,
-    ) -> Vec<(OutPoint, TxOut)> {
-        let tx_is_confirmed_map: HashMap<_, _> =
-            history.iter().map(|h| (h.tx_hash, h.height > 0)).collect();
-
-        txs.iter()
-            .flat_map(|tx| {
-                tx.output
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, output)| output.script_pubkey == *spk)
-                    .filter(|(vout, _)| {
-                        // Check if output is unspent (only consider confirmed spending txs)
-                        !txs.iter().any(|spending_tx| {
-                            let spends_our_output = spending_tx.input.iter().any(|input| {
-                                input.previous_output.txid == tx.compute_txid()
-                                    && input.previous_output.vout == *vout as u32
-                            });
-
-                            if !spends_our_output {
-                                return false;
-                            }
-
-                            // If it does spend our output, check if it's confirmed
-                            let spending_tx_hash = spending_tx.compute_txid();
-                            tx_is_confirmed_map
-                                .get(&spending_tx_hash)
-                                .copied()
-                                .unwrap_or(false)
-                        })
-                    })
-                    .map(|(vout, output)| {
-                        (
-                            OutPoint::new(tx.compute_txid(), vout as u32),
-                            output.clone(),
-                        )
-                    })
-            })
-            .collect()
+        let client = network_config.build_bitcoin_client()?;
+        client
+            .get_address_utxos(&self.to_address(network_config.network())?)
+            .await
     }
 
     /// Fetch utxo for script from BoltzApi
-    pub async fn fetch_lockup_utxo_boltz(
+    pub async fn fetch_lockup_utxo_boltz<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: &str,
         swap_id: &str,
         tx_kind: SwapTxKind,
@@ -537,10 +488,10 @@ pub struct BtcSwapTx {
 impl BtcSwapTx {
     /// Craft a new ClaimTx. Only works for Reverse and Chain Swaps.
     /// Returns None, if the HTLC utxo doesn't exist for the swap.
-    pub async fn new_claim(
+    pub async fn new_claim<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         swap_script: BtcSwapScript,
         claim_address: String,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<BtcSwapTx, Error> {
@@ -559,7 +510,7 @@ impl BtcSwapTx {
 
         address.is_valid_for_network(network);
 
-        let utxo_info = match swap_script.fetch_utxos(network_config) {
+        let utxo_info = match swap_script.fetch_utxos(network_config).await {
             Ok(v) => v.first().cloned(),
             Err(_) => {
                 swap_script
@@ -588,10 +539,10 @@ impl BtcSwapTx {
 
     /// Construct a RefundTX corresponding to the swap_script. Only works for Submarine and Chain Swaps.
     /// Returns None, if the HTLC UTXO for the swap doesn't exist in blockhcian.
-    pub async fn new_refund(
+    pub async fn new_refund<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         swap_script: BtcSwapScript,
         refund_address: &str,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<BtcSwapTx, Error> {
@@ -612,7 +563,7 @@ impl BtcSwapTx {
             return Err(Error::Address("Address validation failed".to_string()));
         };
 
-        let utxos = match swap_script.fetch_utxos(network_config) {
+        let utxos = match swap_script.fetch_utxos(network_config).await {
             Ok(r) => r,
             Err(_) => {
                 let lockup_utxo_info = swap_script
@@ -1242,172 +1193,14 @@ impl BtcSwapTx {
     }
 
     /// Broadcast transaction to the network.
-    pub fn broadcast(
+    pub async fn broadcast<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
         signed_tx: &Transaction,
-        network_config: &ElectrumConfig,
+        network_config: &N,
     ) -> Result<Txid, Error> {
-        Ok(network_config
-            .build_client()?
-            .transaction_broadcast(signed_tx)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::BtcSwapScript;
-    use bitcoin::absolute::LockTime;
-    use bitcoin::blockdata::transaction::Transaction;
-    use bitcoin::blockdata::transaction::Txid;
-    use bitcoin::transaction::Version;
-    use bitcoin::{Amount, OutPoint, Script, ScriptBuf, TxIn, TxOut};
-    use electrum_client::GetHistoryRes;
-    use std::str::FromStr;
-
-    #[test]
-    fn test_utxo_fetching() {
-        let our_script = ScriptBuf::from_hex("aaaa").unwrap();
-        let other_script = ScriptBuf::from_hex("bbbb").unwrap();
-
-        // Pending tx with unspent output
-        let tx1 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(1000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx1_id = tx1.compute_txid();
-
-        // Confirmed tx with unspent output
-        let tx2 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(2000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx2_id = tx2.compute_txid();
-
-        // Confirmed tx with unconfirmed spend
-        let tx3 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(5000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx3_id = tx3.compute_txid();
-
-        // Confirmed tx with confirmed spend
-        let tx4 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(4500),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx4_id = tx4.compute_txid();
-
-        // Confirmed spending tx for tx4's output
-        let spending_tx = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(tx4_id, 0),
-                ..Default::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(1500),
-                script_pubkey: other_script.clone(),
-            }],
-        };
-
-        let spending_tx_id = spending_tx.compute_txid();
-
-        // Pending spending tx for tx3's output
-        let pending_spending_tx = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(tx3_id, 0),
-                ..Default::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(500),
-                script_pubkey: other_script.clone(),
-            }],
-        };
-
-        let pending_spending_tx_id = pending_spending_tx.compute_txid();
-
-        // Transaction history
-        let history = vec![
-            GetHistoryRes {
-                tx_hash: tx1_id,
-                height: 0, // Pending
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx2_id,
-                height: 100, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx3_id,
-                height: 101, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx4_id,
-                height: 102, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: spending_tx_id,
-                height: 103, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: pending_spending_tx_id,
-                height: 0, // Pending
-                fee: None,
-            },
-        ];
-
-        let utxo_pairs = BtcSwapScript::fetch_utxos_core(
-            &[tx1, tx2, tx3, tx4, spending_tx, pending_spending_tx],
-            &history,
-            &our_script,
-        );
-
-        assert_eq!(utxo_pairs.len(), 3);
-
-        // Pending tx with unspent output
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx1_id));
-
-        // Confirmed tx with unspent output
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx2_id));
-
-        // Confirmed tx with unconfirmed spend
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx3_id));
+        network_config
+            .build_bitcoin_client()?
+            .broadcast_tx(signed_tx)
+            .await
     }
 }

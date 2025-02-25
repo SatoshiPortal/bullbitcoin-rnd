@@ -1,7 +1,11 @@
 /// The Global Error enum. Encodes all possible internal library errors
 #[derive(Debug)]
 pub enum Error {
+    #[cfg(feature = "electrum")]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     Electrum(electrum_client::Error),
+    #[cfg(feature = "esplora")]
+    Esplora(String),
     Hex(String),
     Protocol(String),
     Key(bitcoin::key::ParsePublicKeyError),
@@ -28,6 +32,8 @@ pub enum Error {
     Generic(String),
 }
 
+#[cfg(feature = "electrum")]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 impl From<electrum_client::Error> for Error {
     fn from(value: electrum_client::Error) -> Self {
         Self::Electrum(value)
@@ -242,7 +248,11 @@ impl Error {
     // Returns the name of the enum variant as a string
     pub fn name(&self) -> String {
         match self {
+            #[cfg(feature = "electrum")]
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             Error::Electrum(_) => "Electrum",
+            #[cfg(feature = "esplora")]
+            Error::Esplora(_) => "Esplora",
             Error::Hex(_) => "Hex",
             Error::Protocol(_) => "Protocol",
             Error::Key(_) => "Key",
@@ -274,7 +284,11 @@ impl Error {
     // Returns the error message as a string
     pub fn message(&self) -> String {
         match self {
+            #[cfg(feature = "electrum")]
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             Error::Electrum(e) => e.to_string(),
+            #[cfg(feature = "esplora")]
+            Error::Esplora(e) => e.clone(),
             Error::Hex(e) => e.clone(),
             Error::Protocol(e) => e.clone(),
             Error::Key(e) => e.to_string(),
