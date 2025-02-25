@@ -16,13 +16,11 @@ jobs:
         rust:
           - stable
           - nightly
-        features:
-          - default
     steps:
       - name: checkout
         uses: actions/checkout@v3
       - name: Generate cache key
-        run: echo "${{ matrix.rust }} ${{ matrix.features }}" | tee .cache_key
+        run: echo "${{ matrix.rust }}" | tee .cache_key
       - name: cache
         uses: actions/cache@v2
         with:
@@ -33,9 +31,35 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('.cache_key') }}-${{ hashFiles('**/Cargo.toml','**/Cargo.lock') }}
       - name: Set default toolchain
         run: rustup default ${{ matrix.rust }}
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
       - name: Set profile
         run: rustup set profile minimal
       - name: Update toolchain
         run: rustup update
       - name: Build
-        run: cargo build --features ${{ matrix.features }}
+        run: make cargo-build
+      - name: Build wasm
+        run: make wasm-build
+
+  build-as-wasm-dependency:
+    name: Build as wasm dependency
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
+      - name: Create wasm project
+        run: |
+          wasm-pack new wasm-project
+          cd wasm-project
+          sed -i.bak -e 's/edition = .*/edition = "2021"/' Cargo.toml
+          rm Cargo.toml.bak
+          # Patch needed until secp256k1-zkp wasm compatibility is fixed
+          echo -e '\n[workspace]\n\n[patch.crates-io]\nsecp256k1-zkp = { git = "https://github.com/danielgranhao/rust-secp256k1-zkp.git", rev = "e02a6d611f2844e0fb158537b4b3824d0341db61" }' >> Cargo.toml
+          # In this test, we reference the checked out repo (e.g. this PR branch)
+          cargo add --path ../ boltz-client
+          wasm-pack build --target web
