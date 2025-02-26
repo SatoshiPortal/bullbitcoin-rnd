@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 name: test
@@ -17,5 +17,11 @@ jobs:
         run: rustup default nightly
       - name: Set profile
         run: rustup set profile minimal
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
       - name: Run cargo test
-        run: cargo test -- --nocapture
+        run: make cargo-test
+      - name: Run wasm-pack test
+        run: make wasm-test

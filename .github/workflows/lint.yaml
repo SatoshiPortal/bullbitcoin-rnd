@@ -1,7 +1,7 @@
 on:
   push:
     branches:
-    - master
+      - master
   pull_request:
 
 name: lint
@@ -22,9 +22,13 @@ jobs:
         run: rustup component add rustfmt
       - name: Add clippy
         run: rustup component add clippy
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
       - name: Update toolchain
         run: rustup update
       - name: Check fmt
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: make cargo-clippy
+      - name: Clippy wasm
+        run: make wasm-clippy

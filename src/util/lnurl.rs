@@ -18,7 +18,7 @@ pub fn validate_lnurl(string: &str) -> bool {
     }
 }
 
-pub fn fetch_invoice(address: &str, amount_msats: u64) -> Result<String, Error> {
+pub async fn fetch_invoice(address: &str, amount_msats: u64) -> Result<String, Error> {
     let address = address.to_lowercase();
     let lnurl = match LnUrl::from_str(&address) {
         Ok(lnurl) => lnurl,
@@ -29,16 +29,18 @@ pub fn fetch_invoice(address: &str, amount_msats: u64) -> Result<String, Error> 
     };
 
     let client = Builder::default()
-        .build_blocking()
+        .build_async()
         .map_err(|e| Error::Generic(e.to_string()))?;
     let res = client
         .make_request(&lnurl.url)
+        .await
         .map_err(|e| Error::HTTP(e.to_string()))?;
 
     match res {
         LnUrlResponse::LnUrlPayResponse(pay) => {
             let pay_result = client
                 .get_invoice(&pay, amount_msats, None, None)
+                .await
                 .map_err(|e| Error::HTTP(e.to_string()))?;
             let invoice = Bolt11Invoice::from_str(pay_result.invoice()).map_err(Error::Bolt11)?;
 
@@ -54,16 +56,17 @@ pub fn fetch_invoice(address: &str, amount_msats: u64) -> Result<String, Error> 
     }
 }
 
-pub fn create_withdraw_response(voucher: &str) -> Result<WithdrawalResponse, Error> {
+pub async fn create_withdraw_response(voucher: &str) -> Result<WithdrawalResponse, Error> {
     let lnurl = LnUrl::from_str(&voucher.to_lowercase())
         .map_err(|_| Error::Generic("Invalid LNURL".to_string()))?;
 
     let client = Builder::default()
-        .build_blocking()
+        .build_async()
         .map_err(|e| Error::Generic(e.to_string()))?;
 
     let res = client
         .make_request(&lnurl.url)
+        .await
         .map_err(|e| Error::HTTP(e.to_string()))?;
 
     match res {
@@ -72,13 +75,14 @@ pub fn create_withdraw_response(voucher: &str) -> Result<WithdrawalResponse, Err
     }
 }
 
-pub fn process_withdrawal(withdraw: &WithdrawalResponse, invoice: &str) -> Result<(), Error> {
+pub async fn process_withdrawal(withdraw: &WithdrawalResponse, invoice: &str) -> Result<(), Error> {
     let client = Builder::default()
-        .build_blocking()
+        .build_async()
         .map_err(|e| Error::Generic(e.to_string()))?;
 
     let withdraw_result = client
         .do_withdrawal(withdraw, invoice)
+        .await
         .map_err(|e| Error::HTTP(e.to_string()))?;
 
     Ok(())
@@ -88,8 +92,8 @@ pub fn process_withdrawal(withdraw: &WithdrawalResponse, invoice: &str) -> Resul
 mod tests {
     use super::*;
 
-    fn test_address(address: &str, amount_msats: u64, format: &str) {
-        let result = fetch_invoice(address, amount_msats);
+    async fn test_address(address: &str, amount_msats: u64, format: &str) {
+        let result = fetch_invoice(address, amount_msats).await;
 
         match result {
             Ok(invoice) => {
@@ -106,8 +110,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_fetch_invoice() {
+    #[macros::async_test_all]
+    async fn test_fetch_invoice() {
         let amount_msats = 100000;
         let lnurl = "lnurl1dp68gurn8ghj7um9wfmxjcm99e3k7mf0v9cxj0m385ekvcenxc6r2c35xvukxefcv5mkvv34x5ekzd3ev56nyd3hxqurzepexejxxepnxscrvwfnv9nxzcn9xq6xyefhvgcxxcmyxymnserxfq5fns";
         let uppercase_lnurl = lnurl.to_uppercase();
@@ -121,12 +125,12 @@ mod tests {
     }
 
     #[ignore = "Requires using an new lnurl-w voucher and invoice to match the max_withdrawble amount"]
-    #[test]
-    fn test_process_withdrawal() {
+    #[macros::async_test_all]
+    async fn test_process_withdrawal() {
         let voucher = "LNURL1DP68GURN8GHJ7ER9D4HJUMRWVF5HGUEWVDHK6TMHD96XSERJV9MJ7CTSDYHHVVF0D3H82UNV9AVYS6ZV899XS4J6WFYRV6Z9TQU4GUT9VF48SWY20AR";
         let invoice = "lnbc4u1pnsywcypp5eamm4c3v42vlyr0asmt55muv02zusjp2dy7j6e3kuz5vv3cuyj6scqpjsp56hujjsj4r76gp9gk6y435rz99682uxjx924a06wwqm0av6ezxepq9q7sqqqqqqqqqqqqqqqqqqqsqqqqqysgqdqqmqz9gxqyjw5qrzjqwryaup9lh50kkranzgcdnn2fgvx390wgj5jd07rwr3vxeje0glcllm8u4a8gvusysqqqqlgqqqqqeqqjqtgxt57vzea9xaygxu806xf7w5872n737ptuc6al0plf3544a2f5y2e42j9qv7gvkqkn9k2yxzmew6rr40z2gyq9nu8atj2yt4dlfm3gpjevcgu";
         assert!(validate_lnurl(voucher));
-        let withdraw_response = match create_withdraw_response(voucher) {
+        let withdraw_response = match create_withdraw_response(voucher).await {
             Ok(response) => response,
             Err(e) => {
                 println!("Failed to create withdraw response: {:?}", e);
@@ -153,7 +157,7 @@ mod tests {
             "Successfully created withdraw response{:?}",
             withdraw_response
         );
-        let result = process_withdrawal(&withdraw_response, invoice);
+        let result = process_withdrawal(&withdraw_response, invoice).await;
 
         assert!(result.is_ok(), "Withdrawal failed: {:?}", result.err());
 

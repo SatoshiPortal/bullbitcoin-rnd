@@ -1,7 +1,11 @@
 /// The Global Error enum. Encodes all possible internal library errors
 #[derive(Debug)]
 pub enum Error {
+    #[cfg(feature = "electrum")]
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     Electrum(electrum_client::Error),
+    #[cfg(feature = "esplora")]
+    Esplora(String),
     Hex(String),
     Protocol(String),
     Key(bitcoin::key::ParsePublicKeyError),
@@ -22,12 +26,14 @@ pub enum Error {
     Hash(bitcoin::hashes::FromSliceError),
     Locktime(String),
     Url(url::ParseError),
-    WebSocket(tungstenite::Error),
+    WebSocket(tokio_tungstenite_wasm::Error),
     Taproot(String),
     Musig2(String),
     Generic(String),
 }
 
+#[cfg(feature = "electrum")]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 impl From<electrum_client::Error> for Error {
     fn from(value: electrum_client::Error) -> Self {
         Self::Electrum(value)
@@ -88,8 +94,8 @@ impl From<bitcoin::secp256k1::Error> for Error {
     }
 }
 
-impl From<ureq::Error> for Error {
-    fn from(value: ureq::Error) -> Self {
+impl From<reqwest::Error> for Error {
+    fn from(value: reqwest::Error) -> Self {
         Self::HTTP(value.to_string())
     }
 }
@@ -178,8 +184,8 @@ impl From<url::ParseError> for Error {
     }
 }
 
-impl From<tungstenite::Error> for Error {
-    fn from(value: tungstenite::Error) -> Self {
+impl From<tokio_tungstenite_wasm::Error> for Error {
+    fn from(value: tokio_tungstenite_wasm::Error) -> Self {
         Self::WebSocket(value)
     }
 }
@@ -242,7 +248,11 @@ impl Error {
     // Returns the name of the enum variant as a string
     pub fn name(&self) -> String {
         match self {
+            #[cfg(feature = "electrum")]
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             Error::Electrum(_) => "Electrum",
+            #[cfg(feature = "esplora")]
+            Error::Esplora(_) => "Esplora",
             Error::Hex(_) => "Hex",
             Error::Protocol(_) => "Protocol",
             Error::Key(_) => "Key",
@@ -274,7 +284,11 @@ impl Error {
     // Returns the error message as a string
     pub fn message(&self) -> String {
         match self {
+            #[cfg(feature = "electrum")]
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
             Error::Electrum(e) => e.to_string(),
+            #[cfg(feature = "esplora")]
+            Error::Esplora(e) => e.clone(),
             Error::Hex(e) => e.clone(),
             Error::Protocol(e) => e.clone(),
             Error::Key(e) => e.to_string(),

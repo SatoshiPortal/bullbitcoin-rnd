@@ -7,7 +7,7 @@ mod tests {
     use bitcoin::hex::FromHex;
     use elements::secp256k1_zkp::{PedersenCommitment, Secp256k1 as ZKSecp256k1};
 
-    #[test]
+    #[macros::test_all]
     fn test_ct_primitives() {
         // 1. Test Pedersen commitment - https://docs.rs/secp256k1-zkp/0.9.2/secp256k1_zkp/struct.PedersenCommitment.html
         let secp = ZKSecp256k1::new();

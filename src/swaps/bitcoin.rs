@@ -15,18 +15,13 @@ use bitcoin::{
 };
 use bitcoin::{sighash::SighashCache, Network, Sequence, Transaction, TxIn, TxOut, Witness};
 use bitcoin::{Amount, EcdsaSighashType, TapLeafHash, TapSighashType, Txid, XOnlyPublicKey};
-use electrum_client::{ElectrumApi, GetHistoryRes};
 use elements::encode::serialize;
 use elements::pset::serialize::Serialize;
 use std::collections::HashMap;
 use std::ops::{Add, Index};
 use std::str::FromStr;
 
-use crate::{
-    error::Error,
-    network::{electrum::ElectrumConfig, Chain},
-    util::secrets::Preimage,
-};
+use crate::{error::Error, network::Chain, util::secrets::Preimage};
 use crate::{LBtcSwapScript, LBtcSwapTx};
 
 use bitcoin::{blockdata::locktime::absolute::LockTime, hashes::hash160};
@@ -37,6 +32,7 @@ use super::boltz::{
     SwapTxKind, SwapType, ToSign,
 };
 
+use crate::network::{BitcoinClient, BitcoinNetworkConfig};
 use crate::util::fees::{create_tx_with_fee, Fee};
 use elements::secp256k1_zkp::{
     musig, MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
@@ -395,76 +391,31 @@ impl BtcSwapScript {
     }
 
     /// Get the balance of the script
-    pub fn get_balance(&self, network_config: &ElectrumConfig) -> Result<(u64, i64), Error> {
-        let electrum_client = network_config.build_client()?;
-        let spk = self.to_address(network_config.network())?.script_pubkey();
-        let script_balance = electrum_client.script_get_balance(spk.as_script())?;
-        Ok((script_balance.confirmed, script_balance.unconfirmed))
+    pub async fn get_balance<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
+        &self,
+        network_config: &N,
+    ) -> Result<(u64, i64), Error> {
+        let client = network_config.build_bitcoin_client()?;
+        client
+            .get_address_balance(&self.to_address(network_config.network())?)
+            .await
     }
 
     /// Fetch (utxo,amount) pairs for all utxos of the script_pubkey of this swap.
-    pub fn fetch_utxos(
+    pub async fn fetch_utxos<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
-        network_config: &ElectrumConfig,
+        network_config: &N,
     ) -> Result<Vec<(OutPoint, TxOut)>, Error> {
-        let electrum_client = network_config.build_client()?;
-        let spk = self.to_address(network_config.network())?.script_pubkey();
-        let history: Vec<_> = electrum_client.script_get_history(spk.as_script())?;
-
-        let txs = electrum_client
-            .batch_transaction_get(&history.iter().map(|h| h.tx_hash).collect::<Vec<_>>())?;
-
-        Ok(Self::fetch_utxos_core(&txs, &history, &spk))
-    }
-
-    fn fetch_utxos_core(
-        txs: &[Transaction],
-        history: &[GetHistoryRes],
-        spk: &ScriptBuf,
-    ) -> Vec<(OutPoint, TxOut)> {
-        let tx_is_confirmed_map: HashMap<_, _> =
-            history.iter().map(|h| (h.tx_hash, h.height > 0)).collect();
-
-        txs.iter()
-            .flat_map(|tx| {
-                tx.output
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, output)| output.script_pubkey == *spk)
-                    .filter(|(vout, _)| {
-                        // Check if output is unspent (only consider confirmed spending txs)
-                        !txs.iter().any(|spending_tx| {
-                            let spends_our_output = spending_tx.input.iter().any(|input| {
-                                input.previous_output.txid == tx.compute_txid()
-                                    && input.previous_output.vout == *vout as u32
-                            });
-
-                            if !spends_our_output {
-                                return false;
-                            }
-
-                            // If it does spend our output, check if it's confirmed
-                            let spending_tx_hash = spending_tx.compute_txid();
-                            tx_is_confirmed_map
-                                .get(&spending_tx_hash)
-                                .copied()
-                                .unwrap_or(false)
-                        })
-                    })
-                    .map(|(vout, output)| {
-                        (
-                            OutPoint::new(tx.compute_txid(), vout as u32),
-                            output.clone(),
-                        )
-                    })
-            })
-            .collect()
+        let client = network_config.build_bitcoin_client()?;
+        client
+            .get_address_utxos(&self.to_address(network_config.network())?)
+            .await
     }
 
     /// Fetch utxo for script from BoltzApi
-    pub fn fetch_lockup_utxo_boltz(
+    pub async fn fetch_lockup_utxo_boltz<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: &str,
         swap_id: &str,
         tx_kind: SwapTxKind,
@@ -473,7 +424,7 @@ impl BtcSwapScript {
         let hex = match self.swap_type {
             SwapType::Chain => match tx_kind {
                 SwapTxKind::Claim => {
-                    let chain_txs = boltz_client.get_chain_txs(swap_id)?;
+                    let chain_txs = boltz_client.get_chain_txs(swap_id).await?;
                     chain_txs
                         .server_lock
                         .ok_or(Error::Protocol(
@@ -483,7 +434,7 @@ impl BtcSwapScript {
                         .hex
                 }
                 SwapTxKind::Refund => {
-                    let chain_txs = boltz_client.get_chain_txs(swap_id)?;
+                    let chain_txs = boltz_client.get_chain_txs(swap_id).await?;
                     chain_txs
                         .user_lock
                         .ok_or(Error::Protocol(
@@ -493,8 +444,8 @@ impl BtcSwapScript {
                         .hex
                 }
             },
-            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id)?.hex,
-            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id)?.hex,
+            SwapType::ReverseSubmarine => boltz_client.get_reverse_tx(swap_id).await?.hex,
+            SwapType::Submarine => boltz_client.get_submarine_tx(swap_id).await?.hex,
         };
         if (hex.is_none()) {
             return Err(Error::Hex(
@@ -537,10 +488,10 @@ pub struct BtcSwapTx {
 impl BtcSwapTx {
     /// Craft a new ClaimTx. Only works for Reverse and Chain Swaps.
     /// Returns None, if the HTLC utxo doesn't exist for the swap.
-    pub fn new_claim(
+    pub async fn new_claim<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         swap_script: BtcSwapScript,
         claim_address: String,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<BtcSwapTx, Error> {
@@ -559,14 +510,18 @@ impl BtcSwapTx {
 
         address.is_valid_for_network(network);
 
-        let utxo_info = match swap_script.fetch_utxos(network_config) {
+        let utxo_info = match swap_script.fetch_utxos(network_config).await {
             Ok(v) => v.first().cloned(),
-            Err(_) => swap_script.fetch_lockup_utxo_boltz(
-                network_config,
-                &boltz_url,
-                &swap_id,
-                SwapTxKind::Claim,
-            )?,
+            Err(_) => {
+                swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Claim,
+                    )
+                    .await?
+            }
         };
         if let Some(utxo) = utxo_info {
             Ok(BtcSwapTx {
@@ -584,10 +539,10 @@ impl BtcSwapTx {
 
     /// Construct a RefundTX corresponding to the swap_script. Only works for Submarine and Chain Swaps.
     /// Returns None, if the HTLC UTXO for the swap doesn't exist in blockhcian.
-    pub fn new_refund(
+    pub async fn new_refund<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         swap_script: BtcSwapScript,
         refund_address: &str,
-        network_config: &ElectrumConfig,
+        network_config: &N,
         boltz_url: String,
         swap_id: String,
     ) -> Result<BtcSwapTx, Error> {
@@ -608,15 +563,17 @@ impl BtcSwapTx {
             return Err(Error::Address("Address validation failed".to_string()));
         };
 
-        let utxos = match swap_script.fetch_utxos(network_config) {
+        let utxos = match swap_script.fetch_utxos(network_config).await {
             Ok(r) => r,
             Err(_) => {
-                let lockup_utxo_info = swap_script.fetch_lockup_utxo_boltz(
-                    network_config,
-                    &boltz_url,
-                    &swap_id,
-                    SwapTxKind::Refund,
-                )?;
+                let lockup_utxo_info = swap_script
+                    .fetch_lockup_utxo_boltz(
+                        network_config,
+                        &boltz_url,
+                        &swap_id,
+                        SwapTxKind::Refund,
+                    )
+                    .await?;
 
                 match lockup_utxo_info {
                     Some(r) => vec![r],
@@ -691,12 +648,12 @@ impl BtcSwapTx {
     /// Errors if called on a Submarine Swap or Refund Tx.
     /// If the claim is cooperative, provide the other party's partial sigs.
     /// If this is None, transaction will be claimed via taproot script path.
-    pub fn sign_claim(
+    pub async fn sign_claim(
         &self,
         keys: &Keypair,
         preimage: &Preimage,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::Submarine {
             return Err(Error::Protocol(
@@ -766,27 +723,35 @@ impl BtcSwapTx {
             let claim_tx_hex = claim_tx.serialize().to_lower_hex_string();
             let partial_sig_resp = match self.swap_script.swap_type {
                 SwapType::Chain => match (pub_nonce, partial_sig) {
-                    (Some(pub_nonce), Some(partial_sig)) => boltz_api.post_chain_claim_tx_details(
-                        &swap_id,
-                        preimage,
-                        pub_nonce,
-                        partial_sig,
-                        ToSign {
-                            pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
-                            transaction: claim_tx_hex,
-                            index: 0,
-                        },
-                    ),
+                    (Some(pub_nonce), Some(partial_sig)) => {
+                        boltz_api
+                            .post_chain_claim_tx_details(
+                                &swap_id,
+                                preimage,
+                                pub_nonce,
+                                partial_sig,
+                                ToSign {
+                                    pub_nonce: claim_pub_nonce.serialize().to_lower_hex_string(),
+                                    transaction: claim_tx_hex,
+                                    index: 0,
+                                },
+                            )
+                            .await
+                    }
                     _ => Err(Error::Protocol(
                         "Chain swap claim needs a partial_sig".to_string(),
                     )),
                 },
-                SwapType::ReverseSubmarine => boltz_api.get_reverse_partial_sig(
-                    &swap_id,
-                    preimage,
-                    &claim_pub_nonce,
-                    &claim_tx_hex,
-                ),
+                SwapType::ReverseSubmarine => {
+                    boltz_api
+                        .get_reverse_partial_sig(
+                            &swap_id,
+                            preimage,
+                            &claim_pub_nonce,
+                            &claim_tx_hex,
+                        )
+                        .await
+                }
                 _ => Err(Error::Protocol(format!(
                     "Cannot get partial sig for {:?} Swap",
                     self.swap_script.swap_type
@@ -932,11 +897,11 @@ impl BtcSwapTx {
 
     /// Sign a refund transaction.
     /// Errors if called for a Reverse Swap.
-    pub fn sign_refund(
+    pub async fn sign_refund(
         &self,
         keys: &Keypair,
         fee: Fee,
-        is_cooperative: Option<Cooperative>,
+        is_cooperative: Option<Cooperative<'_>>,
     ) -> Result<Transaction, Error> {
         if self.swap_script.swap_type == SwapType::ReverseSubmarine {
             return Err(Error::Protocol(
@@ -1004,18 +969,26 @@ impl BtcSwapTx {
                 // Step 7: Get boltz's partial sig
                 let refund_tx_hex = refund_tx.serialize().to_lower_hex_string();
                 let partial_sig_resp = match self.swap_script.swap_type {
-                    SwapType::Chain => boltz_api.get_chain_partial_sig(
-                        &swap_id,
-                        input_index,
-                        &pub_nonce,
-                        &refund_tx_hex,
-                    ),
-                    SwapType::Submarine => boltz_api.get_submarine_partial_sig(
-                        &swap_id,
-                        input_index,
-                        &pub_nonce,
-                        &refund_tx_hex,
-                    ),
+                    SwapType::Chain => {
+                        boltz_api
+                            .get_chain_partial_sig(
+                                &swap_id,
+                                input_index,
+                                &pub_nonce,
+                                &refund_tx_hex,
+                            )
+                            .await
+                    }
+                    SwapType::Submarine => {
+                        boltz_api
+                            .get_submarine_partial_sig(
+                                &swap_id,
+                                input_index,
+                                &pub_nonce,
+                                &refund_tx_hex,
+                            )
+                            .await
+                    }
                     _ => Err(Error::Protocol(format!(
                         "Cannot get partial sig for {:?} Swap",
                         self.swap_script.swap_type
@@ -1220,172 +1193,14 @@ impl BtcSwapTx {
     }
 
     /// Broadcast transaction to the network.
-    pub fn broadcast(
+    pub async fn broadcast<BC: BitcoinClient, N: BitcoinNetworkConfig<BC>>(
         &self,
         signed_tx: &Transaction,
-        network_config: &ElectrumConfig,
+        network_config: &N,
     ) -> Result<Txid, Error> {
-        Ok(network_config
-            .build_client()?
-            .transaction_broadcast(signed_tx)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::BtcSwapScript;
-    use bitcoin::absolute::LockTime;
-    use bitcoin::blockdata::transaction::Transaction;
-    use bitcoin::blockdata::transaction::Txid;
-    use bitcoin::transaction::Version;
-    use bitcoin::{Amount, OutPoint, Script, ScriptBuf, TxIn, TxOut};
-    use electrum_client::GetHistoryRes;
-    use std::str::FromStr;
-
-    #[test]
-    fn test_utxo_fetching() {
-        let our_script = ScriptBuf::from_hex("aaaa").unwrap();
-        let other_script = ScriptBuf::from_hex("bbbb").unwrap();
-
-        // Pending tx with unspent output
-        let tx1 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(1000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx1_id = tx1.compute_txid();
-
-        // Confirmed tx with unspent output
-        let tx2 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(2000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx2_id = tx2.compute_txid();
-
-        // Confirmed tx with unconfirmed spend
-        let tx3 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(5000),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx3_id = tx3.compute_txid();
-
-        // Confirmed tx with confirmed spend
-        let tx4 = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn::default()],
-            output: vec![TxOut {
-                value: Amount::from_sat(4500),
-                script_pubkey: our_script.clone(),
-            }],
-        };
-
-        let tx4_id = tx4.compute_txid();
-
-        // Confirmed spending tx for tx4's output
-        let spending_tx = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(tx4_id, 0),
-                ..Default::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(1500),
-                script_pubkey: other_script.clone(),
-            }],
-        };
-
-        let spending_tx_id = spending_tx.compute_txid();
-
-        // Pending spending tx for tx3's output
-        let pending_spending_tx = Transaction {
-            version: Version(1),
-            lock_time: LockTime::ZERO,
-            input: vec![TxIn {
-                previous_output: OutPoint::new(tx3_id, 0),
-                ..Default::default()
-            }],
-            output: vec![TxOut {
-                value: Amount::from_sat(500),
-                script_pubkey: other_script.clone(),
-            }],
-        };
-
-        let pending_spending_tx_id = pending_spending_tx.compute_txid();
-
-        // Transaction history
-        let history = vec![
-            GetHistoryRes {
-                tx_hash: tx1_id,
-                height: 0, // Pending
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx2_id,
-                height: 100, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx3_id,
-                height: 101, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: tx4_id,
-                height: 102, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: spending_tx_id,
-                height: 103, // Confirmed
-                fee: None,
-            },
-            GetHistoryRes {
-                tx_hash: pending_spending_tx_id,
-                height: 0, // Pending
-                fee: None,
-            },
-        ];
-
-        let utxo_pairs = BtcSwapScript::fetch_utxos_core(
-            &[tx1, tx2, tx3, tx4, spending_tx, pending_spending_tx],
-            &history,
-            &our_script,
-        );
-
-        assert_eq!(utxo_pairs.len(), 3);
-
-        // Pending tx with unspent output
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx1_id));
-
-        // Confirmed tx with unspent output
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx2_id));
-
-        // Confirmed tx with unconfirmed spend
-        assert!(utxo_pairs
-            .iter()
-            .any(|(outpoint, _)| outpoint.txid == tx3_id));
+        network_config
+            .build_bitcoin_client()?
+            .broadcast_tx(signed_tx)
+            .await
     }
 }

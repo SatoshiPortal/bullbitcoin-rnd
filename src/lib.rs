@@ -14,7 +14,6 @@ pub mod util;
 
 // Re-export common libs, so callers can make use of them and avoid version conflicts
 pub use bitcoin;
-pub use electrum_client;
 pub use elements;
 pub use lightning_invoice;
 #[cfg(feature = "lnurl")]

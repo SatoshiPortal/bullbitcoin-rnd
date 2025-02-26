@@ -4,13 +4,18 @@ description = "a boltz exchange client for swaps between BTC/LBTC & LN"
 authors = ["i5hi <ishi@satoshiportal.com>", "Rajarshi Maitra <raj@bitshala.org>"]
 version = "0.2.0"
 edition = "2021"
-license="MIT"
+license = "MIT"
 
 [lib]
 name = "boltz_client"
 path = "src/lib.rs"
 doctest = false
-crate-type = ["lib"] 
+crate-type = ["lib"]
+
+[workspace]
+members = [
+    "macros"
+]
 
 [profile.release]
 strip = true
@@ -22,28 +27,47 @@ panic = "abort"
 [dependencies]
 serde = { version = "1.0.0", features = ["derive"] }
 serde_json = "1.0.0"
-ureq = { version = "2.5.0", features = ["json", "native-tls"] }
 bip39 = "2.0.0"
-electrum-client = { version = "0.21.0", default-features=false, features = ["use-rustls-ring", "proxy"] }
-bitcoin = {version = "0.32.2", features = ["rand", "base64", "rand-std"]}
+bitcoin = { version = "0.32.2", features = ["rand", "base64", "rand-std"] }
 elements = { version = "0.25.0", features = ["serde"] }
 lightning-invoice = "0.32.0"
-tungstenite = { version = "0.21.0", features = ["native-tls-vendored"] }
 url = "2.5.0"
 log = "^0.4"
 env_logger = "0.7"
-native-tls = "0.2.11"
 hex = "0.4"
-lnurl-rs = { version = "0.8.0", optional = true }
+lnurl-rs = { version = "0.9.0", default-features = false, features = ["async", "async-https"], optional = true }
+# Pin to commit until https://github.com/seanmonstar/reqwest/pull/1760 gets released
+reqwest = { git = "https://github.com/seanmonstar/reqwest", rev = "00b15b9a893d350388af513179e1a973dfa26f85", features = ["json"] }
+tokio-tungstenite-wasm = { version = "0.5.0", features = ["native-tls"] }
+async-trait = "0.1.86"
+macros = { path = "macros" }
+
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
+electrum-client = { version = "0.21.0", default-features = false, features = ["use-rustls-ring", "proxy"], optional = true }
+tokio = "1.43.0"
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+js-sys = "0.3.77"
+web-sys = "0.3.77"
+wasm-bindgen-futures = "0.4.50"
 
 [patch.crates-io]
-secp256k1-zkp = { git = "https://github.com/dangeross/rust-secp256k1-zkp.git", rev = "57d29b15269ca2ce3c3b118b6a72b66c1169e7b1" }
+secp256k1-zkp = { git = "https://github.com/danielgranhao/rust-secp256k1-zkp.git", rev = "e02a6d611f2844e0fb158537b4b3824d0341db61" }
 
 [dev-dependencies]
-bitcoind = {version = "0.36.0", features = ["25_0"] }
-elementsd = {version  = "0.11.0", features = ["22_1_1"] }
+futures-util = "0.3.31"
 
-#Empty default feature set, (helpful to generalise in github actions)
+[target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
+bitcoind = { version = "0.36.0", features = ["25_0"] }
+elementsd = { version = "0.11.0", features = ["22_1_1"] }
+tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dev-dependencies]
+wasm-bindgen-test = "0.3.50"
+
 [features]
-default = []
+default = ["esplora"]
 lnurl = ["dep:lnurl-rs"]
+esplora = []
+electrum = ["dep:electrum-client"]

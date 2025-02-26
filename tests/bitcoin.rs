@@ -1,7 +1,12 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "electrum")]
+use boltz_client::network::electrum::ElectrumConfig;
+#[cfg(feature = "esplora")]
+use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
 use boltz_client::{
-    network::{electrum::ElectrumConfig, Chain},
+    network::Chain,
     swaps::{
         boltz::{
             BoltzApiClientV2, Cooperative, CreateReverseRequest, CreateSubmarineRequest,
@@ -21,12 +26,34 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
+use boltz_client::network::{BitcoinClient, BitcoinNetworkConfig};
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
-#[test]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_submarine() {
+async fn bitcoin_v2_submarine_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_submarine(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn bitcoin_v2_submarine_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_submarine(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_submarine<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = bitcoin::secp256k1::Secp256k1::new();
@@ -61,7 +88,7 @@ fn bitcoin_v2_submarine() {
         webhook: None,
     };
 
-    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).unwrap();
+    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).await.unwrap();
 
     log::info!("Got Swap Response from Boltz server");
 
@@ -73,19 +100,21 @@ fn bitcoin_v2_submarine() {
     log::debug!("Created Swap Script. : {:?}", swap_script);
 
     // Subscribe to websocket updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&Subscription::new(&swap_id.clone())).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = &swap_id.clone();
 
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -137,14 +166,16 @@ fn bitcoin_v2_submarine() {
                         let swap_tx = BtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
+                        .await
                         .expect("Funding UTXO not found");
 
                         let claim_tx_response = boltz_api_v2
                             .get_submarine_claim_tx_details(swap_id)
+                            .await
                             .unwrap();
 
                         log::debug!("Received claim tx details : {:?}", claim_tx_response);
@@ -168,6 +199,7 @@ fn bitcoin_v2_submarine() {
                             .unwrap();
                         boltz_api_v2
                             .post_submarine_claim_tx_details(swap_id, pub_nonce, partial_sig)
+                            .await
                             .unwrap();
                         log::info!("Successfully Sent partial signature");
                     }
@@ -185,25 +217,30 @@ fn bitcoin_v2_submarine() {
                         let swap_tx = BtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.to_owned(),
                         )
+                        .await
                         .expect("Funding UTXO not found");
 
-                        match swap_tx.sign_refund(
-                            &our_keys,
-                            Fee::Absolute(1000),
-                            Some(Cooperative {
-                                boltz_api: &boltz_api_v2,
-                                swap_id: swap_id.clone(),
-                                pub_nonce: None,
-                                partial_sig: None,
-                            }),
-                        ) {
+                        match swap_tx
+                            .sign_refund(
+                                &our_keys,
+                                Fee::Absolute(1000),
+                                Some(Cooperative {
+                                    boltz_api: &boltz_api_v2,
+                                    swap_id: swap_id.clone(),
+                                    pub_nonce: None,
+                                    partial_sig: None,
+                                }),
+                            )
+                            .await
+                        {
                             Ok(tx) => {
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                                    .broadcast(&tx, &bitcoin_network_config)
+                                    .await
                                     .unwrap();
                                 log::info!("Cooperative Refund Successfully broadcasted: {}", txid);
                             }
@@ -213,9 +250,11 @@ fn bitcoin_v2_submarine() {
 
                                 let tx = swap_tx
                                     .sign_refund(&our_keys, Fee::Absolute(1000), None)
+                                    .await
                                     .unwrap();
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                                    .broadcast(&tx, &bitcoin_network_config)
+                                    .await
                                     .unwrap();
                                 log::info!(
                                     "Non-cooperative Refund Successfully broadcasted: {}",
@@ -245,9 +284,25 @@ fn bitcoin_v2_submarine() {
     }
 }
 
-#[test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_reverse() {
+async fn bitcoin_v2_reverse_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_reverse(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn bitcoin_v2_reverse_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_reverse(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_reverse<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -279,9 +334,13 @@ fn bitcoin_v2_reverse() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
 
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -291,20 +350,20 @@ fn bitcoin_v2_reverse() {
         BtcSwapScript::reverse_from_swap_resp(&reverse_resp, claim_public_key).unwrap();
     let swap_id = reverse_resp.id.clone();
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = reverse_resp.id.clone();
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
                 continue;
@@ -346,10 +405,11 @@ fn bitcoin_v2_reverse() {
                         let claim_tx = BtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id.clone(),
                         )
+                        .await
                         .expect("Funding tx expected");
 
                         let tx = claim_tx
@@ -364,10 +424,12 @@ fn bitcoin_v2_reverse() {
                                     partial_sig: None,
                                 }),
                             )
+                            .await
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                            .broadcast(&tx, &bitcoin_network_config)
+                            .await
                             .unwrap();
 
                         log::info!("Successfully broadcasted claim tx!");
@@ -395,9 +457,25 @@ fn bitcoin_v2_reverse() {
     }
 }
 
-#[test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn bitcoin_v2_reverse_script_path() {
+async fn bitcoin_v2_reverse_script_path_electrum() {
+    let bitcoin_network_config = ElectrumConfig::default_bitcoin();
+    bitcoin_v2_reverse_script_path(bitcoin_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn bitcoin_v2_reverse_script_path_esplora() {
+    let bitcoin_network_config = EsploraConfig::default_bitcoin();
+    bitcoin_v2_reverse_script_path(bitcoin_network_config).await
+}
+
+async fn bitcoin_v2_reverse_script_path<BC: BitcoinClient, BN: BitcoinNetworkConfig<BC>>(
+    bitcoin_network_config: BN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -429,9 +507,13 @@ fn bitcoin_v2_reverse_script_path() {
 
     let boltz_api_v2 = BoltzApiClientV2::new(BOLTZ_TESTNET_URL_V2);
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
     let swap_id = reverse_resp.id.clone();
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -441,21 +523,21 @@ fn bitcoin_v2_reverse_script_path() {
         BtcSwapScript::reverse_from_swap_resp(&reverse_resp, claim_public_key).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id.clone());
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
         let swap_id = reverse_resp.id.clone();
 
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -498,18 +580,21 @@ fn bitcoin_v2_reverse_script_path() {
                         let claim_tx = BtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_bitcoin(),
+                            &bitcoin_network_config,
                             BOLTZ_TESTNET_URL_V2.to_owned(),
                             swap_id,
                         )
+                        .await
                         .expect("Funding tx expected");
 
                         let tx = claim_tx
                             .sign_claim(&our_keys, &preimage, Fee::Absolute(1000), None)
+                            .await
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_bitcoin())
+                            .broadcast(&tx, &bitcoin_network_config)
+                            .await
                             .unwrap();
 
                         log::info!("Successfully broadcasted claim tx!");

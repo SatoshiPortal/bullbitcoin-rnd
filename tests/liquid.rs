@@ -1,7 +1,12 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "electrum")]
+use boltz_client::network::electrum::ElectrumConfig;
+#[cfg(feature = "esplora")]
+use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
 use boltz_client::{
-    network::{electrum::ElectrumConfig, Chain},
+    network::Chain,
     swaps::{
         boltz::{
             BoltzApiClientV2, Cooperative, CreateReverseRequest, CreateSubmarineRequest,
@@ -21,13 +26,35 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
+use boltz_client::network::{LiquidClient, LiquidNetworkConfig};
 use elements::encode::serialize;
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite_wasm::Message;
 
 pub mod test_utils;
 
-#[test]
+#[cfg(all(target_family = "wasm", target_os = "unknown"))]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn liquid_v2_submarine() {
+async fn liquid_v2_submarine_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_submarine(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_submarine_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_submarine(liquid_network_config).await
+}
+
+async fn liquid_v2_submarine<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -63,7 +90,7 @@ fn liquid_v2_submarine() {
         webhook: None,
     };
 
-    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).unwrap();
+    let create_swap_response = boltz_api_v2.post_swap_req(&create_swap_req).await.unwrap();
     log::info!("Got Swap Response from Boltz server");
 
     create_swap_response
@@ -80,17 +107,19 @@ fn liquid_v2_submarine() {
     log::debug!("Created Swap Script. : {:?}", swap_script);
 
     // Subscribe to websocket updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    socket
-        .send(tungstenite::Message::Text(
+    sender
+        .send(Message::text(
             serde_json::to_string(&Subscription::new(&create_swap_response.id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -138,15 +167,17 @@ fn liquid_v2_submarine() {
                         let swap_tx = LBtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default(chain, None).unwrap(),
+                            &liquid_network_config,
                             boltz_url.to_string(),
                             create_swap_response.clone().id,
                         )
+                        .await
                         .unwrap();
                         // why? ^^^s
 
                         let claim_tx_response = boltz_api_v2
                             .get_submarine_claim_tx_details(&create_swap_response.clone().id)
+                            .await
                             .unwrap();
 
                         log::debug!("Received claim tx details : {:?}", claim_tx_response);
@@ -174,6 +205,7 @@ fn liquid_v2_submarine() {
                                 pub_nonce,
                                 partial_sig,
                             )
+                            .await
                             .unwrap();
                         log::info!("Successfully Sent partial signature");
                     }
@@ -186,28 +218,33 @@ fn liquid_v2_submarine() {
                         let swap_tx = LBtcSwapTx::new_refund(
                             swap_script.clone(),
                             &refund_address,
-                            &ElectrumConfig::default(chain, None).unwrap(),
+                            &liquid_network_config,
                             boltz_url.to_string(),
                             create_swap_response.clone().id,
                         )
+                        .await
                         .unwrap();
 
-                        match swap_tx.sign_refund(
-                            &our_keys,
-                            Fee::Absolute(1000),
-                            None,
-                            // Some(Cooperative {
-                            //     boltz_api: &boltz_api_v2,
-                            //     swap_id: create_swap_response.id.clone(),
-                            //     pub_nonce: None,
-                            //     partial_sig: None,
-                            // }),
-                            false,
-                        ) {
+                        match swap_tx
+                            .sign_refund(
+                                &our_keys,
+                                Fee::Absolute(1000),
+                                None,
+                                // Some(Cooperative {
+                                //     boltz_api: &boltz_api_v2,
+                                //     swap_id: create_swap_response.id.clone(),
+                                //     pub_nonce: None,
+                                //     partial_sig: None,
+                                // }),
+                                false,
+                            )
+                            .await
+                        {
                             Ok(tx) => {
                                 println!("{}", tx.serialize().to_lower_hex_string());
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                                    .broadcast(&tx, &liquid_network_config, None)
+                                    .await
                                     .unwrap();
                                 log::info!("Cooperative Refund Successfully broadcasted: {}", txid);
                             }
@@ -217,9 +254,11 @@ fn liquid_v2_submarine() {
 
                                 let tx = swap_tx
                                     .sign_refund(&our_keys, Fee::Absolute(1000), None, false)
+                                    .await
                                     .unwrap();
                                 let txid = swap_tx
-                                    .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                                    .broadcast(&tx, &liquid_network_config, None)
+                                    .await
                                     .unwrap();
                                 log::info!(
                                     "Non-cooperative Refund Successfully broadcasted: {}",
@@ -254,9 +293,25 @@ fn liquid_v2_submarine() {
     }
 }
 
-#[test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn liquid_v2_reverse() {
+async fn liquid_v2_reverse_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_reverse(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_reverse_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_reverse(liquid_network_config).await
+}
+
+async fn liquid_v2_reverse<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -290,7 +345,10 @@ fn liquid_v2_reverse() {
         webhook: None,
     };
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
     reverse_resp
         .validate(&preimage, &claim_public_key, chain)
         .unwrap();
@@ -299,6 +357,7 @@ fn liquid_v2_reverse() {
     let swap_id = reverse_resp.clone().id;
 
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -309,19 +368,19 @@ fn liquid_v2_reverse() {
     swap_script.to_address(Chain::LiquidTestnet).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -364,10 +423,11 @@ fn liquid_v2_reverse() {
                         let claim_tx = LBtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_liquid(),
+                            &liquid_network_config,
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
 
                         let tx = claim_tx
@@ -384,10 +444,12 @@ fn liquid_v2_reverse() {
                                 // }),
                                 false,
                             )
+                            .await
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .broadcast(&tx, &liquid_network_config, None)
+                            .await
                             .unwrap();
 
                         // To test Lowball broadcast uncomment below line
@@ -424,9 +486,25 @@ fn liquid_v2_reverse() {
     }
 }
 
-#[test]
+#[macros::async_test]
+#[cfg(feature = "electrum")]
 #[ignore = "Requires testnet invoice and refund address"]
-fn liquid_v2_reverse_script_path() {
+async fn liquid_v2_reverse_script_path_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    liquid_v2_reverse_script_path(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn liquid_v2_reverse_script_path_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    liquid_v2_reverse_script_path(liquid_network_config).await
+}
+
+async fn liquid_v2_reverse_script_path<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let secp = Secp256k1::new();
@@ -460,7 +538,10 @@ fn liquid_v2_reverse_script_path() {
         webhook: None,
     };
 
-    let reverse_resp = boltz_api_v2.post_reverse_req(create_reverse_req).unwrap();
+    let reverse_resp = boltz_api_v2
+        .post_reverse_req(create_reverse_req)
+        .await
+        .unwrap();
     reverse_resp
         .validate(&preimage, &claim_public_key, chain)
         .unwrap();
@@ -469,6 +550,7 @@ fn liquid_v2_reverse_script_path() {
     let swap_id = reverse_resp.clone().id;
 
     let _ = check_for_mrh(&boltz_api_v2, &reverse_resp.invoice, Chain::BitcoinTestnet)
+        .await
         .unwrap()
         .unwrap();
 
@@ -479,19 +561,19 @@ fn liquid_v2_reverse_script_path() {
     swap_script.to_address(Chain::LiquidTestnet).unwrap();
 
     // Subscribe to wss status updates
-    let mut socket = boltz_api_v2.connect_ws().unwrap();
+    let (mut sender, mut receiver) = boltz_api_v2.connect_ws().await.unwrap().split();
 
-    let subscription = Subscription::new(&swap_id);
-
-    socket
-        .send(tungstenite::Message::Text(
-            serde_json::to_string(&subscription).unwrap(),
+    sender
+        .send(Message::text(
+            serde_json::to_string(&Subscription::new(&swap_id)).unwrap(),
         ))
+        .await
         .unwrap();
 
     // Event handlers for various swap status.
     loop {
-        let response = serde_json::from_str(&socket.read().unwrap().to_string());
+        let response =
+            serde_json::from_str(&receiver.next().await.unwrap().unwrap().into_text().unwrap());
 
         if response.is_err() {
             if response.expect_err("expected").is_eof() {
@@ -534,18 +616,21 @@ fn liquid_v2_reverse_script_path() {
                         let claim_tx = LBtcSwapTx::new_claim(
                             swap_script.clone(),
                             claim_address.clone(),
-                            &ElectrumConfig::default_liquid(),
+                            &liquid_network_config,
                             BOLTZ_TESTNET_URL_V2.to_string(),
                             swap_id.clone(),
                         )
+                        .await
                         .unwrap();
 
                         let tx = claim_tx
                             .sign_claim(&our_keys, &preimage, Fee::Absolute(1000), None, false)
+                            .await
                             .unwrap();
 
                         claim_tx
-                            .broadcast(&tx, &ElectrumConfig::default_liquid(), None)
+                            .broadcast(&tx, &liquid_network_config, None)
+                            .await
                             .unwrap();
 
                         // To test Lowball broadcast uncomment below line
@@ -582,11 +667,27 @@ fn liquid_v2_reverse_script_path() {
     }
 }
 
+#[macros::async_test]
+#[cfg(feature = "electrum")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn test_recover_liquidv2_refund_electrum() {
+    let liquid_network_config = ElectrumConfig::default_liquid();
+    test_recover_liquidv2_refund(liquid_network_config).await
+}
+
+#[macros::async_test_all]
+#[cfg(feature = "esplora")]
+#[ignore = "Requires testnet invoice and refund address"]
+async fn test_recover_liquidv2_refund_esplora() {
+    let liquid_network_config = EsploraConfig::default_liquid();
+    test_recover_liquidv2_refund(liquid_network_config).await
+}
+
 // _$SwapTxSensitiveImpl (SwapTxSensitive(id: xJ9E5spWSbmw, secretKey: 5c2c8120ff354ed8b6440121c621b0395d7cccc839a6200cf0b8208e19483ed1, publicKey: 0273daf3d9728b7bd7a716fdf4b05b4b12a0febd570f8b708bfcffc1026e2c0f47, preimage: , sha256: 451f1df5a5ccc1e487cf691c21c1b90737557a9df3171a69aaa6dc1578bc6be4, hash160: 726bbbe8393827392d21445922ee87b254c07285, redeemScript: redeemScript, boltzPubkey: 0329724923c9a845eb044fa4ff323f850af6b995185b2cc18335d896011f894acd, isSubmarine: true, scriptAddress: null, locktime: 2868372, blindingKey: 1b581bed3300b146c61bdb3e5b58413f85299b71ab36401a8e02ec38d57925aa))
 
-#[test]
-#[ignore]
-fn test_recover_liquidv2_refund() {
+async fn test_recover_liquidv2_refund<LC: LiquidClient, LN: LiquidNetworkConfig<LC>>(
+    liquid_network_config: LN,
+) {
     setup_logger();
 
     let id = "xJ9E5spWSbmw".to_string();
@@ -613,7 +714,7 @@ fn test_recover_liquidv2_refund() {
     let blinding_key =
         "1b581bed3300b146c61bdb3e5b58413f85299b71ab36401a8e02ec38d57925aa".to_string();
     let absolute_fees = 1_200;
-    let network_config = ElectrumConfig::default(Chain::Liquid, None).unwrap();
+    let network_config = liquid_network_config;
     let swap_script: LBtcSwapScript = create_swap_script_v2(
         script_address,
         preimage.hash160.to_string(),
@@ -630,6 +731,7 @@ fn test_recover_liquidv2_refund() {
         BOLTZ_MAINNET_URL_V2.to_string(),
         id.clone(),
     )
+    .await
     .unwrap();
     let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
     let coop = Some(Cooperative {
@@ -640,12 +742,14 @@ fn test_recover_liquidv2_refund() {
     });
     let signed_tx = rev_swap_tx
         .sign_refund(&keypair, Fee::Absolute(absolute_fees), coop, false)
+        .await
         .unwrap();
     let tx_hex = serialize(&signed_tx).to_lower_hex_string();
     log::info!("TX_HEX: {}", tx_hex);
 
     let txid = rev_swap_tx
         .broadcast(&signed_tx, &network_config, None)
+        .await
         .unwrap();
     println!("{}", txid);
 }

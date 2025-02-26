@@ -23,14 +23,11 @@ use bitcoin::{
 };
 use lightning_invoice::Bolt11Invoice;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fmt::{Display, Formatter, Write};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::format, net::TcpStream};
-use tungstenite::{connect, http::response, stream::MaybeTlsStream, WebSocket};
-use ureq::json;
-use ureq::{AgentBuilder, TlsConnector};
 
 use crate::{error::Error, network::Chain, util::secrets::Preimage};
 use crate::{BtcSwapScript, LBtcSwapScript};
@@ -45,6 +42,8 @@ use elements::secp256k1_zkp::{
     MusigAggNonce, MusigKeyAggCache, MusigPartialSignature, MusigPubNonce, MusigSession,
     MusigSessionId,
 };
+pub use tokio_tungstenite_wasm::Message as WsMessage;
+use tokio_tungstenite_wasm::{connect, WebSocketStream};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HeightResponse {
@@ -315,123 +314,117 @@ impl GetChainPairsResponse {
 #[derive(Debug, Clone)]
 pub struct BoltzApiClientV2 {
     base_url: String,
+    http_client: reqwest::Client,
 }
 
 impl BoltzApiClientV2 {
     pub fn new(base_url: &str) -> Self {
+        let http_client = reqwest::Client::new();
         Self {
             base_url: base_url.to_string(),
+            http_client,
         }
     }
 
     /// Returns the web socket connection to the boltz server
-    pub fn connect_ws(&self) -> Result<WebSocket<MaybeTlsStream<TcpStream>>, Error> {
+    pub async fn connect_ws(&self) -> Result<WebSocketStream, Error> {
         let ws_string = self.base_url.clone().replace("http", "ws") + "/ws";
-        let (socket, response) = connect(Url::parse(&ws_string)?)?;
-        log::debug!("websocket response: {:?}", response);
-        Ok(socket)
+        Ok(connect(ws_string).await?)
     }
 
     /// Make a get request. returns the Response
-    fn get(&self, end_point: &str) -> Result<String, Error> {
+    async fn get(&self, end_point: &str) -> Result<String, Error> {
         let url = format!("{}/{}", self.base_url, end_point);
-        Ok(ureq::get(&url).call()?.into_string()?)
+        Ok(self.http_client.get(url).send().await?.text().await?)
     }
 
     /// Make a Post request. Returns the Response
-    fn post(&self, end_point: &str, data: impl Serialize) -> Result<String, Error> {
+    async fn post(&self, end_point: &str, data: impl Serialize) -> Result<String, Error> {
         let url = format!("{}/{}", self.base_url, end_point);
-        // Ok(ureq::post(&url).send_json(data)?.into_string()?)
 
-        let response = match native_tls::TlsConnector::new() {
-            // If native_tls is available, use that for TLS
-            // It has better handling of close_notify, which avoids some POST call failures
-            // See https://github.com/SatoshiPortal/boltz-rust/issues/39
-            Ok(tls_connector) => {
-                let response = match AgentBuilder::new()
-                    .tls_connector(Arc::new(tls_connector))
-                    .build()
-                    .request("POST", &url)
-                    .send_json(data)
-                {
-                    Ok(r) => {
-                        log::debug!("POST response: {:#?}", r);
-                        r.into_string()?
-                    }
-                    Err(ureq_err) => {
-                        log::error!("POST error: {:#?}", ureq_err);
-                        let err = match ureq_err {
-                            ureq::Error::Status(_code, err_resp) => {
-                                let e_val: Value = serde_json::from_str(&err_resp.into_string()?)?;
-                                let e_str = e_val.get("error").unwrap_or(&Value::Null).to_string();
-                                Error::HTTP(e_str)
-                            }
-                            ureq::Error::Transport(_) => ureq_err.into(),
-                        };
-                        return Err(err);
-                    }
-                };
-                response
+        match self.http_client.post(url).json(&data).send().await {
+            Ok(r) => {
+                if r.status().is_success() {
+                    log::debug!("POST response: {:#?}", r);
+                    Ok(r.text().await?)
+                } else {
+                    log::error!("POST error: HTTP {}", r.status());
+                    let err_resp = r.text().await.unwrap_or("Unknown error".to_string());
+                    let e_val: Value = serde_json::from_str(&err_resp).unwrap_or(Value::Null);
+                    let e_str = e_val.get("error").unwrap_or(&Value::Null).to_string();
+                    Err(Error::HTTP(e_str))
+                }
             }
-            // If native_tls is not available, fallback to the default (rustls)
-            Err(_) => ureq::post(&url).send_json(data)?.into_string()?,
-        };
-        Ok(response)
+            Err(e) => {
+                log::error!("POST error: {:#?}", e);
+                Err(e.into())
+            }
+        }
     }
 
-    pub fn get_fee_estimation(&self) -> Result<GetFeeEstimationResponse, Error> {
-        Ok(serde_json::from_str(&self.get("chain/fees")?)?)
+    pub async fn get_fee_estimation(&self) -> Result<GetFeeEstimationResponse, Error> {
+        Ok(serde_json::from_str(&self.get("chain/fees").await?)?)
     }
 
-    pub fn get_height(&self) -> Result<HeightResponse, Error> {
-        Ok(serde_json::from_str(&self.get("chain/heights")?)?)
+    pub async fn get_height(&self) -> Result<HeightResponse, Error> {
+        Ok(serde_json::from_str(&self.get("chain/heights").await?)?)
     }
 
-    pub fn get_submarine_pairs(&self) -> Result<GetSubmarinePairsResponse, Error> {
-        Ok(serde_json::from_str(&self.get("swap/submarine")?)?)
+    pub async fn get_submarine_pairs(&self) -> Result<GetSubmarinePairsResponse, Error> {
+        Ok(serde_json::from_str(&self.get("swap/submarine").await?)?)
     }
 
-    pub fn get_reverse_pairs(&self) -> Result<GetReversePairsResponse, Error> {
-        Ok(serde_json::from_str(&self.get("swap/reverse")?)?)
+    pub async fn get_reverse_pairs(&self) -> Result<GetReversePairsResponse, Error> {
+        Ok(serde_json::from_str(&self.get("swap/reverse").await?)?)
     }
 
-    pub fn get_chain_pairs(&self) -> Result<GetChainPairsResponse, Error> {
-        Ok(serde_json::from_str(&self.get("swap/chain")?)?)
+    pub async fn get_chain_pairs(&self) -> Result<GetChainPairsResponse, Error> {
+        Ok(serde_json::from_str(&self.get("swap/chain").await?)?)
     }
 
-    pub fn post_swap_req(
+    pub async fn post_swap_req(
         &self,
         swap_request: &CreateSubmarineRequest,
     ) -> Result<CreateSubmarineResponse, Error> {
         let data = serde_json::to_value(swap_request)?;
-        Ok(serde_json::from_str(&self.post("swap/submarine", data)?)?)
+        Ok(serde_json::from_str(
+            &self.post("swap/submarine", data).await?,
+        )?)
     }
 
-    pub fn post_reverse_req(
+    pub async fn post_reverse_req(
         &self,
         req: CreateReverseRequest,
     ) -> Result<CreateReverseResponse, Error> {
-        Ok(serde_json::from_str(&self.post("swap/reverse", req)?)?)
+        Ok(serde_json::from_str(
+            &self.post("swap/reverse", req).await?,
+        )?)
     }
 
-    pub fn post_chain_req(&self, req: CreateChainRequest) -> Result<CreateChainResponse, Error> {
-        Ok(serde_json::from_str(&self.post("swap/chain", req)?)?)
+    pub async fn post_chain_req(
+        &self,
+        req: CreateChainRequest,
+    ) -> Result<CreateChainResponse, Error> {
+        Ok(serde_json::from_str(&self.post("swap/chain", req).await?)?)
     }
 
-    pub fn get_submarine_claim_tx_details(
+    pub async fn get_submarine_claim_tx_details(
         &self,
         id: &String,
     ) -> Result<SubmarineClaimTxResponse, Error> {
         let endpoint = format!("swap/submarine/{}/claim", id);
-        Ok(serde_json::from_str(&self.get(&endpoint)?)?)
+        Ok(serde_json::from_str(&self.get(&endpoint).await?)?)
     }
 
-    pub fn get_chain_claim_tx_details(&self, id: &String) -> Result<ChainClaimTxResponse, Error> {
+    pub async fn get_chain_claim_tx_details(
+        &self,
+        id: &String,
+    ) -> Result<ChainClaimTxResponse, Error> {
         let endpoint = format!("swap/chain/{}/claim", id);
-        Ok(serde_json::from_str(&self.get(&endpoint)?)?)
+        Ok(serde_json::from_str(&self.get(&endpoint).await?)?)
     }
 
-    pub fn post_submarine_claim_tx_details(
+    pub async fn post_submarine_claim_tx_details(
         &self,
         id: &String,
         pub_nonce: MusigPubNonce,
@@ -444,10 +437,10 @@ impl BoltzApiClientV2 {
             }
         );
         let endpoint = format!("swap/submarine/{}/claim", id);
-        Ok(serde_json::from_str(&self.post(&endpoint, data)?)?)
+        Ok(serde_json::from_str(&self.post(&endpoint, data).await?)?)
     }
 
-    pub fn post_chain_claim_tx_details(
+    pub async fn post_chain_claim_tx_details(
         &self,
         id: &String,
         preimage: &Preimage,
@@ -466,34 +459,41 @@ impl BoltzApiClientV2 {
             }
         );
         let endpoint = format!("swap/chain/{}/claim", id);
-        Ok(serde_json::from_str(&self.post(&endpoint, data)?)?)
+        Ok(serde_json::from_str(&self.post(&endpoint, data).await?)?)
     }
 
-    pub fn get_reverse_tx(&self, id: &str) -> Result<ReverseSwapTxResp, Error> {
+    pub async fn get_reverse_tx(&self, id: &str) -> Result<ReverseSwapTxResp, Error> {
         Ok(serde_json::from_str(
-            &self.get(&format!("swap/reverse/{}/transaction", id))?,
+            &self
+                .get(&format!("swap/reverse/{}/transaction", id))
+                .await?,
         )?)
     }
 
-    pub fn get_submarine_tx(&self, id: &str) -> Result<SubmarineSwapTxResp, Error> {
+    pub async fn get_submarine_tx(&self, id: &str) -> Result<SubmarineSwapTxResp, Error> {
         Ok(serde_json::from_str(
-            &self.get(&format!("swap/submarine/{}/transaction", id))?,
+            &self
+                .get(&format!("swap/submarine/{}/transaction", id))
+                .await?,
         )?)
     }
 
-    pub fn get_submarine_preimage(&self, id: &str) -> Result<SubmarineSwapPreimageResp, Error> {
+    pub async fn get_submarine_preimage(
+        &self,
+        id: &str,
+    ) -> Result<SubmarineSwapPreimageResp, Error> {
         Ok(serde_json::from_str(
-            &self.get(&format!("swap/submarine/{}/preimage", id))?,
+            &self.get(&format!("swap/submarine/{}/preimage", id)).await?,
         )?)
     }
 
-    pub fn get_chain_txs(&self, id: &str) -> Result<ChainSwapTxResp, Error> {
+    pub async fn get_chain_txs(&self, id: &str) -> Result<ChainSwapTxResp, Error> {
         Ok(serde_json::from_str(
-            &self.get(&format!("swap/chain/{}/transactions", id))?,
+            &self.get(&format!("swap/chain/{}/transactions", id)).await?,
         )?)
     }
 
-    pub fn get_reverse_partial_sig(
+    pub async fn get_reverse_partial_sig(
         &self,
         id: &String,
         preimage: &Preimage,
@@ -510,10 +510,10 @@ impl BoltzApiClientV2 {
         );
 
         let endpoint = format!("swap/reverse/{}/claim", id);
-        Ok(serde_json::from_str(&self.post(&endpoint, data)?)?)
+        Ok(serde_json::from_str(&self.post(&endpoint, data).await?)?)
     }
 
-    pub fn get_submarine_partial_sig(
+    pub async fn get_submarine_partial_sig(
         &self,
         id: &String,
         input_index: usize,
@@ -529,10 +529,10 @@ impl BoltzApiClientV2 {
         );
 
         let endpoint = format!("swap/submarine/{}/refund", id);
-        Ok(serde_json::from_str(&self.post(&endpoint, data)?)?)
+        Ok(serde_json::from_str(&self.post(&endpoint, data).await?)?)
     }
 
-    pub fn get_chain_partial_sig(
+    pub async fn get_chain_partial_sig(
         &self,
         id: &String,
         input_index: usize,
@@ -548,15 +548,15 @@ impl BoltzApiClientV2 {
         );
 
         let endpoint = format!("swap/chain/{}/refund", id);
-        Ok(serde_json::from_str(&self.post(&endpoint, data)?)?)
+        Ok(serde_json::from_str(&self.post(&endpoint, data).await?)?)
     }
 
-    pub fn get_mrh_bip21(&self, invoice: &str) -> Result<MrhResponse, Error> {
+    pub async fn get_mrh_bip21(&self, invoice: &str) -> Result<MrhResponse, Error> {
         let request = format!("swap/reverse/{}/bip21", invoice);
-        Ok(serde_json::from_str(&self.get(&request)?)?)
+        Ok(serde_json::from_str(&self.get(&request).await?)?)
     }
 
-    pub fn broadcast_tx(&self, chain: Chain, tx_hex: &String) -> Result<Value, Error> {
+    pub async fn broadcast_tx(&self, chain: Chain, tx_hex: &String) -> Result<Value, Error> {
         let data = json!(
             {
                 "hex": tx_hex
@@ -569,11 +569,11 @@ impl BoltzApiClientV2 {
         };
 
         let end_point = format!("chain/{}/transaction", chain);
-        Ok(serde_json::from_str(&self.post(&end_point, data)?)?)
+        Ok(serde_json::from_str(&self.post(&end_point, data).await?)?)
     }
 
     /// Fetch an invoice for the specified BOLT12 offer
-    pub fn get_bolt12_invoice(
+    pub async fn get_bolt12_invoice(
         &self,
         offer: &str,
         amount: u64,
@@ -586,20 +586,20 @@ impl BoltzApiClientV2 {
         );
 
         let end_point = "lightning/BTC/bolt12/fetch".to_string();
-        Ok(serde_json::from_str(&self.post(&end_point, data)?)?)
+        Ok(serde_json::from_str(&self.post(&end_point, data).await?)?)
     }
 
     /// Gets a quote for a Zero-Amount or over- or underpaid Chain Swap.
     ///
     /// If the user locked up a valid amount, it will return the server lockup amount. In all other
     /// cases, it will return an error.
-    pub fn get_quote(&self, swap_id: &str) -> Result<GetQuoteResponse, Error> {
+    pub async fn get_quote(&self, swap_id: &str) -> Result<GetQuoteResponse, Error> {
         let end_point = format!("swap/chain/{swap_id}/quote");
-        Ok(serde_json::from_str(&self.get(&end_point)?)?)
+        Ok(serde_json::from_str(&self.get(&end_point).await?)?)
     }
 
     /// Accepts a specific quote for a Zero-Amount or over- or underpaid Chain Swap.
-    pub fn accept_quote(&self, swap_id: &str, amount_sat: u64) -> Result<(), Error> {
+    pub async fn accept_quote(&self, swap_id: &str, amount_sat: u64) -> Result<(), Error> {
         let data = json!(
             {
                 "amount": amount_sat
@@ -607,14 +607,14 @@ impl BoltzApiClientV2 {
         );
 
         let end_point = format!("swap/chain/{swap_id}/quote");
-        self.post(&end_point, data)?;
+        self.post(&end_point, data).await?;
         Ok(())
     }
 
     /// Gets the latest status of the Swap
-    pub fn get_swap(&self, swap_id: &str) -> Result<GetSwapResponse, Error> {
+    pub async fn get_swap(&self, swap_id: &str) -> Result<GetSwapResponse, Error> {
         let end_point = format!("swap/{swap_id}");
-        Ok(serde_json::from_str(&self.get(&end_point)?)?)
+        Ok(serde_json::from_str(&self.get(&end_point).await?)?)
     }
 }
 
@@ -1375,96 +1375,99 @@ pub struct GetSwapResponse {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_get_fee_estimation() {
+    #[cfg(all(target_family = "wasm", target_os = "unknown"))]
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[macros::async_test_all]
+    async fn test_get_fee_estimation() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
-        let result = client.get_fee_estimation();
+        let result = client.get_fee_estimation().await;
         assert!(result.is_ok(), "Failed to get fee estimation");
     }
 
-    #[test]
-    fn test_get_height() {
+    #[macros::async_test_all]
+    async fn test_get_height() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
-        let result = client.get_height();
+        let result = client.get_height().await;
         assert!(result.is_ok(), "Failed to get height");
     }
 
-    #[test]
-    fn test_get_submarine_pairs() {
+    #[macros::async_test_all]
+    async fn test_get_submarine_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
-        let result = client.get_submarine_pairs();
+        let result = client.get_submarine_pairs().await;
         assert!(result.is_ok(), "Failed to get submarine pairs");
     }
 
-    #[test]
-    fn test_get_reverse_pairs() {
+    #[macros::async_test_all]
+    async fn test_get_reverse_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
-        let result = client.get_reverse_pairs();
+        let result = client.get_reverse_pairs().await;
         assert!(result.is_ok(), "Failed to get reverse pairs");
     }
 
-    #[test]
-    fn test_get_chain_pairs() {
+    #[macros::async_test_all]
+    async fn test_get_chain_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
-        let result = client.get_chain_pairs();
+        let result = client.get_chain_pairs().await;
         assert!(result.is_ok(), "Failed to get chain pairs");
     }
 
-    #[test]
+    #[macros::async_test_all]
     #[ignore]
-    fn test_get_submarine_claim_tx_details() {
+    async fn test_get_submarine_claim_tx_details() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz".to_string();
-        let result = client.get_submarine_claim_tx_details(&id);
+        let result = client.get_submarine_claim_tx_details(&id).await;
         assert!(
             result.is_ok(),
             "Failed to get submarine claim transaction details"
         );
     }
 
-    #[test]
+    #[macros::async_test_all]
     #[ignore]
-    fn test_get_chain_claim_tx_details() {
+    async fn test_get_chain_claim_tx_details() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "3BIJf8UqGaSC".to_string();
-        let result = client.get_chain_claim_tx_details(&id);
+        let result = client.get_chain_claim_tx_details(&id).await;
         assert!(
             result.is_ok(),
             "Failed to get chain claim transaction details"
         );
     }
 
-    #[test]
+    #[macros::async_test_all]
     #[ignore]
-    fn test_get_reverse_tx() {
+    async fn test_get_reverse_tx() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";
-        let result = client.get_reverse_tx(id);
+        let result = client.get_reverse_tx(id).await;
         assert!(result.is_ok(), "Failed to get reverse transaction");
     }
 
-    #[test]
+    #[macros::async_test_all]
     #[ignore]
-    fn test_get_submarine_tx() {
+    async fn test_get_submarine_tx() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";
-        let result = client.get_submarine_tx(id);
+        let result = client.get_submarine_tx(id).await;
         assert!(result.is_ok(), "Failed to get submarine transaction");
     }
 
-    #[test]
-    fn test_get_chain_txs() {
+    #[macros::async_test_all]
+    async fn test_get_chain_txs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";
-        let result = client.get_chain_txs(id);
+        let result = client.get_chain_txs(id).await;
         assert!(result.is_ok(), "Failed to get chain transactions");
     }
 
-    #[test]
-    fn test_get_swap() {
+    #[macros::async_test_all]
+    async fn test_get_swap() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";
-        let result = client.get_swap(id);
+        let result = client.get_swap(id).await;
         println!("{:#?}", result);
         assert!(result.is_ok(), "Failed to get swap status");
     }
