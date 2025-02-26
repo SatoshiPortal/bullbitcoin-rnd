@@ -1378,66 +1378,42 @@ mod tests {
     #[cfg(all(target_family = "wasm", target_os = "unknown"))]
     wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_fee_estimation() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let result = client.get_fee_estimation().await;
         assert!(result.is_ok(), "Failed to get fee estimation");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_height() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let result = client.get_height().await;
         assert!(result.is_ok(), "Failed to get height");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_submarine_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let result = client.get_submarine_pairs().await;
         assert!(result.is_ok(), "Failed to get submarine pairs");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_reverse_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let result = client.get_reverse_pairs().await;
         assert!(result.is_ok(), "Failed to get reverse pairs");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_chain_pairs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let result = client.get_chain_pairs().await;
         assert!(result.is_ok(), "Failed to get chain pairs");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     #[ignore]
     async fn test_get_submarine_claim_tx_details() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
@@ -1449,11 +1425,7 @@ mod tests {
         );
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     #[ignore]
     async fn test_get_chain_claim_tx_details() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
@@ -1465,11 +1437,7 @@ mod tests {
         );
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     #[ignore]
     async fn test_get_reverse_tx() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
@@ -1478,11 +1446,7 @@ mod tests {
         assert!(result.is_ok(), "Failed to get reverse transaction");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     #[ignore]
     async fn test_get_submarine_tx() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
@@ -1491,11 +1455,7 @@ mod tests {
         assert!(result.is_ok(), "Failed to get submarine transaction");
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::async_test_all]
     async fn test_get_chain_txs() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";

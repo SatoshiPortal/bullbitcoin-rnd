@@ -143,11 +143,7 @@ mod tests {
         find_magic_routing_hint, parse_bip21, MAGIC_ROUTING_HINT_CONSTANT,
     };
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::test_all]
     fn test_bip21_parsing() {
         let uri = "liquidtestnet:tlq1qqt3sgky7zert7237tred5rqmmx0eargp625zkyhr2ldw6yqdvh5fusnm5xk0qfjpejvgm37q7mqtv5epfksv78jweytmqgpd8?amount=0.00005122&assetid=144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a4";
         let (network, address, amount, assetid) = parse_bip21(uri).unwrap();
@@ -171,11 +167,7 @@ mod tests {
         ]
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::test_all]
     fn test_bip21_parsing_with_rounding_edge_cases() {
         let liquid_address = "tlq1qqt3sgky7zert7237tred5rqmmx0eargp625zkyhr2ldw6yqdvh5fusnm5xk0qfjpejvgm37q7mqtv5epfksv78jweytmqgpd8";
         let asset_id = "144c654344aa716d6f3abcc1ca90e5641e4e2a7f633bc09fe3baf64585819a4";
@@ -191,11 +183,7 @@ mod tests {
         }
     }
 
-    #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), test)]
-    #[cfg_attr(
-        all(target_family = "wasm", target_os = "unknown"),
-        wasm_bindgen_test::wasm_bindgen_test
-    )]
+    #[macros::test_all]
     fn test_mrh() {
         let route_hint = find_magic_routing_hint("lntb1m1pnrv328pp5zymney8y48234em5lakrkuk8rfrftn5dkwfys7zghe2c40hxfmusdpz2djkuepqw3hjqnpdgf2yxgrpv3j8yetnwvcqz95xqyp2xqrzjqwyg6p2yhhqvq5d97kkwuk0mnrp3su6sn5fvtxn63gppms9fkegajzzxeyqq28qqqqqqqqqqqqqqq9gq2ysp5znw62my456pnzq7vyfgje2yjfat8gzgf88q8rl30dt3cgpmpk9eq9qyyssq55qds9y2vrtmqxq00fgrnartdhs0wwlt7u5uflzs5wnx8wad8y3y86y8lgre4qaszhvhesa6ts99g7m088j6dgjfe6hhtkfglqfqwjcp03v2nh").unwrap().expect("route hint expected");
         assert_eq!(route_hint.short_channel_id, MAGIC_ROUTING_HINT_CONSTANT);

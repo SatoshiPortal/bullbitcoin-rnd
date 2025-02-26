@@ -311,7 +311,7 @@ mod tests {
     use super::*;
     use elements::pset::serialize::Serialize;
 
-    #[test]
+    #[macros::test_all]
     fn test_derivation() {
         let mnemonic: &str = "bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon bacon";
         let index = 0_u64; // 0
@@ -332,7 +332,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_preimage_from_str() {
         let preimage = Preimage::new();
         assert_eq!(
@@ -341,7 +341,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_preimage_from_vec() {
         let preimage = Preimage::new();
         assert_eq!(
@@ -350,7 +350,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_preimage_from_vec_invalid_length() {
         let mut bytes = [0u8; 33];
         OsRng.fill_bytes(&mut bytes);
@@ -363,7 +363,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_preimage_from_sha256_str() {
         let preimage = Preimage::new();
         let compare = Preimage::from_sha256_str(preimage.sha256.to_string().as_str()).unwrap();
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(compare.hash160, preimage.hash160);
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_preimage_from_sha256_vec() {
         let preimage = Preimage::new();
         let compare = Preimage::from_sha256_vec(preimage.sha256.serialize()).unwrap();
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(compare.hash160, preimage.hash160);
     }
 
-    // #[test]
+    // #[macros::test_all]
     // #[ignore]
     // fn test_recover() {
     //     let recovery = BtcSubmarineRecovery {

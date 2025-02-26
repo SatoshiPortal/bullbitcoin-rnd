@@ -34,7 +34,7 @@ mod tests {
         fee: u64,
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_create_tx_with_fee_relative() {
         let fee = 0.1;
         let vsize = 42;
@@ -43,7 +43,7 @@ mod tests {
         assert_eq!(tx.fee, 5);
     }
 
-    #[test]
+    #[macros::test_all]
     fn test_create_tx_with_fee_absolute() {
         let fee = 21;
         let tx = create_tx_with_fee(Fee::Absolute(fee), |fee| Ok(StubTx { fee }), |_| 42).unwrap();
