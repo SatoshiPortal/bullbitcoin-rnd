@@ -1,3 +1,7 @@
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+#[cfg(feature = "electrum")]
+use boltz_client::network::electrum::ElectrumConfig;
+#[cfg(feature = "esplora")]
 use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
@@ -22,9 +26,6 @@ use bitcoin::{
     PublicKey,
 };
 use boltz_client::fees::Fee;
-#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-#[cfg(feature = "electrum")]
-use boltz_client::network::electrum::ElectrumConfig;
 use boltz_client::network::{LiquidClient, LiquidNetworkConfig};
 use elements::encode::serialize;
 use futures_util::{SinkExt, StreamExt};
@@ -44,6 +45,7 @@ async fn liquid_v2_submarine_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn liquid_v2_submarine_esplora() {
     let liquid_network_config = EsploraConfig::default_liquid();
@@ -300,6 +302,7 @@ async fn liquid_v2_reverse_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn liquid_v2_reverse_esplora() {
     let liquid_network_config = EsploraConfig::default_liquid();
@@ -492,6 +495,7 @@ async fn liquid_v2_reverse_script_path_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn liquid_v2_reverse_script_path_esplora() {
     let liquid_network_config = EsploraConfig::default_liquid();
@@ -672,6 +676,7 @@ async fn test_recover_liquidv2_refund_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn test_recover_liquidv2_refund_esplora() {
     let liquid_network_config = EsploraConfig::default_liquid();

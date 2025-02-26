@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bitcoin::{key::rand::thread_rng, PublicKey};
 use boltz_client::boltz::{
     BoltzApiClientV2, ChainSwapDetails, Cooperative, CreateChainRequest, Side, Subscription,
@@ -9,6 +7,7 @@ use boltz_client::fees::Fee;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[cfg(feature = "electrum")]
 use boltz_client::network::electrum::ElectrumConfig;
+#[cfg(feature = "esplora")]
 use boltz_client::network::esplora::EsploraConfig;
 use boltz_client::network::{
     BitcoinClient, BitcoinNetworkConfig, LiquidClient, LiquidNetworkConfig,
@@ -21,6 +20,7 @@ use boltz_client::{
 use elements::Address as EAddress;
 use futures_util::{SinkExt, StreamExt};
 use std::str::FromStr;
+use std::time::Duration;
 use tokio_tungstenite_wasm::Message;
 
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
@@ -36,6 +36,7 @@ async fn bitcoin_liquid_v2_chain_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore]
 async fn bitcoin_liquid_v2_chain_esplora() {
     let bitcoin_network_config = EsploraConfig::default_bitcoin();
@@ -351,6 +352,7 @@ async fn liquid_bitcoin_v2_chain_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore]
 async fn liquid_bitcoin_v2_chain_esplora() {
     let bitcoin_network_config = EsploraConfig::default_bitcoin();

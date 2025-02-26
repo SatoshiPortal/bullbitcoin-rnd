@@ -1,6 +1,7 @@
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 #[cfg(feature = "electrum")]
 use boltz_client::network::electrum::ElectrumConfig;
+#[cfg(feature = "esplora")]
 use boltz_client::network::esplora::EsploraConfig;
 use std::{str::FromStr, time::Duration};
 
@@ -43,8 +44,8 @@ async fn bitcoin_v2_submarine_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
-
 async fn bitcoin_v2_submarine_esplora() {
     let bitcoin_network_config = EsploraConfig::default_bitcoin();
     bitcoin_v2_submarine(bitcoin_network_config).await
@@ -292,6 +293,7 @@ async fn bitcoin_v2_reverse_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn bitcoin_v2_reverse_esplora() {
     let bitcoin_network_config = EsploraConfig::default_bitcoin();
@@ -464,6 +466,7 @@ async fn bitcoin_v2_reverse_script_path_electrum() {
 }
 
 #[macros::async_test_all]
+#[cfg(feature = "esplora")]
 #[ignore = "Requires testnet invoice and refund address"]
 async fn bitcoin_v2_reverse_script_path_esplora() {
     let bitcoin_network_config = EsploraConfig::default_bitcoin();
