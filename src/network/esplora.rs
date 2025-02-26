@@ -17,7 +17,7 @@ pub const DEFAULT_MAINNET_NODE: &str = "https://blockstream.info/api";
 pub const DEFAULT_LIQUID_TESTNET_NODE: &str = "https://blockstream.info/liquidtestnet/api";
 pub const DEFAULT_LIQUID_MAINNET_NODE: &str = "https://blockstream.info/liquid/api";
 
-pub const DEFAULT_ELECTRUM_TIMEOUT_SECS: u64 = 30;
+pub const DEFAULT_ESPLORA_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Debug, Clone)]
 pub struct EsploraConfig {
@@ -46,32 +46,32 @@ impl EsploraConfig {
             Chain::Bitcoin => Ok(Self::new(
                 Chain::Bitcoin,
                 DEFAULT_MAINNET_NODE,
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
             Chain::BitcoinTestnet => Ok(Self::new(
                 Chain::BitcoinTestnet,
                 DEFAULT_TESTNET_NODE,
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
             Chain::BitcoinRegtest => Ok(Self::new(
                 Chain::BitcoinTestnet,
                 &regtest_url.unwrap(),
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
             Chain::Liquid => Ok(Self::new(
                 Chain::Liquid,
                 DEFAULT_LIQUID_MAINNET_NODE,
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
             Chain::LiquidTestnet => Ok(Self::new(
                 Chain::LiquidTestnet,
                 DEFAULT_LIQUID_TESTNET_NODE,
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
             Chain::LiquidRegtest => Ok(Self::new(
                 Chain::BitcoinTestnet,
                 &regtest_url.unwrap(),
-                DEFAULT_ELECTRUM_TIMEOUT_SECS,
+                DEFAULT_ESPLORA_TIMEOUT_SECS,
             )),
         }
     }
@@ -80,7 +80,7 @@ impl EsploraConfig {
         Self::new(
             Chain::BitcoinTestnet,
             DEFAULT_TESTNET_NODE,
-            DEFAULT_ELECTRUM_TIMEOUT_SECS,
+            DEFAULT_ESPLORA_TIMEOUT_SECS,
         )
     }
 
@@ -88,7 +88,7 @@ impl EsploraConfig {
         Self::new(
             Chain::LiquidTestnet,
             DEFAULT_LIQUID_TESTNET_NODE,
-            DEFAULT_ELECTRUM_TIMEOUT_SECS,
+            DEFAULT_ESPLORA_TIMEOUT_SECS,
         )
     }
 }
