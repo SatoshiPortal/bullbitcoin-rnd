@@ -610,6 +610,12 @@ impl BoltzApiClientV2 {
         self.post(&end_point, data)?;
         Ok(())
     }
+
+    /// Gets the latest status of the Swap
+    pub fn get_swap(&self, swap_id: &str) -> Result<GetSwapResponse, Error> {
+        let end_point = format!("swap/{swap_id}");
+        Ok(serde_json::from_str(&self.get(&end_point)?)?)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1350,6 +1356,21 @@ pub struct GetQuoteResponse {
     pub amount: u64,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionResponse {
+    pub id: String,
+    pub hex: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSwapResponse {
+    pub status: String,
+    pub zero_conf_rejected: Option<bool>,
+    pub transaction: Option<TransactionResponse>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1437,5 +1458,14 @@ mod tests {
         let id = "G6c6GJJY8eXz";
         let result = client.get_chain_txs(id);
         assert!(result.is_ok(), "Failed to get chain transactions");
+    }
+
+    #[test]
+    fn test_get_swap() {
+        let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
+        let id = "G6c6GJJY8eXz";
+        let result = client.get_swap(id);
+        println!("{:#?}", result);
+        assert!(result.is_ok(), "Failed to get swap status");
     }
 }
