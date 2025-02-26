@@ -612,9 +612,9 @@ impl BoltzApiClientV2 {
     }
 
     /// Gets the latest status of the Swap
-    pub fn get_swap(&self, swap_id: &str) -> Result<GetSwapResponse, Error> {
+    pub async fn get_swap(&self, swap_id: &str) -> Result<GetSwapResponse, Error> {
         let end_point = format!("swap/{swap_id}");
-        Ok(serde_json::from_str(&self.get(&end_point)?)?)
+        Ok(serde_json::from_str(&self.get(&end_point).await?)?)
     }
 }
 
@@ -1463,11 +1463,11 @@ mod tests {
         assert!(result.is_ok(), "Failed to get chain transactions");
     }
 
-    #[test]
-    fn test_get_swap() {
+    #[macros::async_test_all]
+    async fn test_get_swap() {
         let client = BoltzApiClientV2::new(BOLTZ_MAINNET_URL_V2);
         let id = "G6c6GJJY8eXz";
-        let result = client.get_swap(id);
+        let result = client.get_swap(id).await;
         println!("{:#?}", result);
         assert!(result.is_ok(), "Failed to get swap status");
     }
