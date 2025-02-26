@@ -261,14 +261,15 @@ impl LiquidClient for EsploraLiquidClient {
         &self,
         address: &elements::Address,
     ) -> Result<(elements::OutPoint, elements::TxOut), Error> {
-        // List address txs (GET /address/:address/txs)
         let utxos_url = format!("{}/address/{}/utxo", self.base_url, address);
         let utxos_response = get_with_retry(&self.client, &utxos_url, self.timeout).await?;
         let utxos: Vec<Utxo> = serde_json::from_str(&utxos_response.text().await?)?;
 
         let txid = &utxos
             .last()
-            .ok_or(Error::Protocol("No Transaction History".to_string()))?
+            .ok_or(Error::Protocol(
+                "Esplora could not find a Liquid UTXO for script".to_string(),
+            ))?
             .txid;
 
         let raw_tx_url = format!("{}/tx/{}/raw", self.base_url, txid);
@@ -283,7 +284,7 @@ impl LiquidClient for EsploraLiquidClient {
             }
         }
         Err(Error::Protocol(
-            "Electrum could not find a Liquid UTXO for script".to_string(),
+            "Esplora could not find a Liquid UTXO for script".to_string(),
         ))
     }
 
@@ -394,7 +395,6 @@ pub struct Transaction {
     pub txid: String,
     pub vin: Vec<Input>,
     pub vout: Vec<Output>,
-    pub fee: u64,
     pub status: Status,
 }
 
@@ -402,13 +402,6 @@ pub struct Transaction {
 pub struct Input {
     pub txid: String,
     pub vout: u32,
-    pub prevout: Prevout,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct Prevout {
-    pub scriptpubkey: String,
-    pub value: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -444,8 +437,8 @@ mod tests {
     #[macros::async_test_all]
     async fn test_esplora_default_clients() {
         let network_config = EsploraConfig::default(Chain::Bitcoin, None).unwrap();
-        let electrum_client = network_config.build_bitcoin_client().unwrap();
-        assert!(electrum_client
+        let esplora_client = network_config.build_bitcoin_client().unwrap();
+        assert!(esplora_client
             .get_address_balance(
                 &bitcoin::Address::from_str("bc1qlaghkgntxw84d8jfv45deup7v32dfmncs7t3ct")
                     .unwrap()
@@ -455,9 +448,9 @@ mod tests {
             .is_ok());
 
         let network_config = EsploraConfig::default(Chain::Liquid, None).unwrap();
-        let electrum_client = network_config.build_liquid_client().unwrap();
+        let esplora_client = network_config.build_liquid_client().unwrap();
         assert_eq!(
-            electrum_client.get_genesis_hash().await.unwrap().to_hex(),
+            esplora_client.get_genesis_hash().await.unwrap().to_hex(),
             "1466275836220db2944ca059a3a10ef6fd2ea684b0688d2c379296888a206003"
         );
     }
@@ -484,17 +477,12 @@ mod tests {
             vin: vec![Input {
                 txid: "1".to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: other_script_hex.to_string(),
-                    value: 2000,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: our_script_hex.to_string(),
                 scriptpubkey_address: our_address.to_string(),
                 value: 1000,
             }],
-            fee: 100,
             status: Status { confirmed: false },
         };
 
@@ -504,17 +492,12 @@ mod tests {
             vin: vec![Input {
                 txid: "2".to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: other_script_hex.to_string(),
-                    value: 3000,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: our_script_hex.to_string(),
                 scriptpubkey_address: our_address.to_string(),
                 value: 2000,
             }],
-            fee: 100,
             status: Status { confirmed: true },
         };
 
@@ -524,17 +507,12 @@ mod tests {
             vin: vec![Input {
                 txid: "3".to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: other_script_hex.to_string(),
-                    value: 6000,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: our_script_hex.to_string(),
                 scriptpubkey_address: our_address.to_string(),
                 value: 5000,
             }],
-            fee: 100,
             status: Status { confirmed: true },
         };
 
@@ -544,17 +522,12 @@ mod tests {
             vin: vec![Input {
                 txid: "4".to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: other_script_hex.to_string(),
-                    value: 5000,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: our_script_hex.to_string(),
                 scriptpubkey_address: our_address.to_string(),
                 value: 4500,
             }],
-            fee: 100,
             status: Status { confirmed: true },
         };
 
@@ -564,17 +537,12 @@ mod tests {
             vin: vec![Input {
                 txid: txid_4.to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: our_script_hex.to_string(),
-                    value: 4500,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: other_script_hex.to_string(),
                 scriptpubkey_address: other_address.to_string(),
                 value: 4000,
             }],
-            fee: 100,
             status: Status { confirmed: true },
         };
 
@@ -584,17 +552,12 @@ mod tests {
             vin: vec![Input {
                 txid: txid_3.to_string(),
                 vout: 0,
-                prevout: Prevout {
-                    scriptpubkey: our_script_hex.to_string(),
-                    value: 5000,
-                },
             }],
             vout: vec![Output {
                 scriptpubkey: other_script_hex.to_string(),
                 scriptpubkey_address: other_address.to_string(),
                 value: 4950,
             }],
-            fee: 50,
             status: Status { confirmed: false },
         };
 
